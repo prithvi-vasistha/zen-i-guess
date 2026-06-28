@@ -1,8 +1,10 @@
 package dev.zig.notificationfilter.ui.apps
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -81,16 +83,25 @@ class ManagedAppsViewModel @Inject constructor(
     private fun loadInstalledApps() {
         viewModelScope.launch(Dispatchers.IO) {
             val pm = context.packageManager
-            val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-                .filter { info ->
-                    pm.getLaunchIntentForPackage(info.packageName) != null &&
-                        info.packageName != context.packageName
-                }
-                .map { info ->
+            val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            // queryIntentActivities(Intent, int) is deprecated in API 33; use ResolveInfoFlags above it.
+            // The <queries> element in AndroidManifest.xml grants visibility to launcher apps on API 30+,
+            // which is what makes this call return third-party apps (YouTube, WhatsApp, etc.).
+            @Suppress("DEPRECATION")
+            val resolveInfoList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0L))
+            } else {
+                pm.queryIntentActivities(launcherIntent, 0)
+            }
+            val apps = resolveInfoList
+                .filter { it.activityInfo.packageName != context.packageName }
+                .distinctBy { it.activityInfo.packageName }
+                .map { resolveInfo ->
+                    val appInfo = resolveInfo.activityInfo.applicationInfo
                     RawApp(
-                        packageName = info.packageName,
-                        appName = pm.getApplicationLabel(info).toString(),
-                        icon = loadIcon(pm, info),
+                        packageName = appInfo.packageName,
+                        appName = pm.getApplicationLabel(appInfo).toString(),
+                        icon = loadIcon(pm, appInfo),
                     )
                 }
                 .sortedBy { it.appName.lowercase() }

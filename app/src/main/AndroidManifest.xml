@@ -16,6 +16,20 @@
     <!-- Required to post notifications on API 33+. Granted at runtime in the onboarding Activity. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        Declare visibility to all apps that expose a launcher intent.
+        Required on API 30+ — without this, PackageManager silently omits
+        third-party apps (YouTube, WhatsApp, etc.) from query results.
+        This does NOT grant any new capabilities; it only makes those packages
+        visible to our PackageManager calls. No QUERY_ALL_PACKAGES permission needed.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ZigApp"
         android:allowBackup="false"
