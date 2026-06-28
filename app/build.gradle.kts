@@ -92,7 +92,13 @@ dependencies {
 // Ensures cargo-ndk is installed on the build machine, installing it if absent.
 // cargo-ndk wraps cargo to cross-compile for Android ABIs and place .so files
 // in the correct jniLibs subdirectories automatically.
+// ~/.cargo/bin is not on Gradle's PATH; resolve it explicitly so Exec tasks
+// can find cargo and cargo-ndk regardless of how Gradle was launched.
+val cargoBinDir = "${System.getProperty("user.home")}/.cargo/bin"
+val gradlePath = "${System.getenv("PATH") ?: ""}:$cargoBinDir"
+
 val ensureCargoNdk by tasks.registering(Exec::class) {
+    environment("PATH", gradlePath)
     commandLine(
         "sh", "-c",
         "cargo ndk --version >/dev/null 2>&1 || cargo install cargo-ndk"
@@ -103,9 +109,10 @@ val ensureCargoNdk by tasks.registering(Exec::class) {
 // .so files under app/src/main/jniLibs/, where AGP picks them up for packaging.
 val buildRustLib by tasks.registering(Exec::class) {
     dependsOn(ensureCargoNdk)
+    environment("PATH", gradlePath)
     workingDir(rootProject.file("native/rust_filter"))
     commandLine(
-        "cargo", "ndk",
+        "$cargoBinDir/cargo", "ndk",
         "-t", "arm64-v8a",
         "-t", "x86_64",
         "-o", layout.projectDirectory.dir("src/main/jniLibs").asFile.absolutePath,
