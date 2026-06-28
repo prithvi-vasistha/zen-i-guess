@@ -4,7 +4,7 @@ use jni::JNIEnv;
 use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
 
-static APP_WHITELIST: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+static MANAGED_APPS: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
 static CONTACT_WHITELIST: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
 
 /// Returns the RwLock for the given whitelist, initialising it on first access.
@@ -14,10 +14,10 @@ fn init_set(
     lock.get_or_init(|| RwLock::new(HashSet::new()))
 }
 
-// ── App whitelist ─────────────────────────────────────────────────────────────
+// ── Managed apps (opt-in set) ─────────────────────────────────────────────────
 
 #[no_mangle]
-pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_isAppWhitelisted<
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_isAppManaged<
     'local,
 >(
     mut env: JNIEnv<'local>,
@@ -28,7 +28,7 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_i
         Ok(s) => s.into(),
         Err(_) => return JNI_FALSE,
     };
-    match init_set(&APP_WHITELIST).read() {
+    match init_set(&MANAGED_APPS).read() {
         Ok(set) => {
             if set.contains(&name) {
                 JNI_TRUE
@@ -41,7 +41,7 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_i
 }
 
 #[no_mangle]
-pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_addAppToWhitelist<
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_addAppToManaged<
     'local,
 >(
     mut env: JNIEnv<'local>,
@@ -52,7 +52,7 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_a
         Ok(s) => s.into(),
         Err(_) => return,
     };
-    if let Ok(mut set) = init_set(&APP_WHITELIST).write() {
+    if let Ok(mut set) = init_set(&MANAGED_APPS).write() {
         set.insert(name);
     }
     // write lock poisoned → skip silently; set remains intact from last good state

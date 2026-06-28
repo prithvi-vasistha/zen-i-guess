@@ -33,7 +33,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         val packageName = sbn.packageName
         val title = resolveTitle(sbn)
 
-        if (NativeBridge.isAppWhitelisted(packageName)) {
+        if (NativeBridge.isAppManaged(packageName)) {
             logAsync(sbn, packageName, title, status = "ALLOWED", filterReason = "APP_WHITELIST")
             return
         }
