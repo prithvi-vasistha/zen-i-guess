@@ -15,3 +15,7 @@
 # Keep WorkManager workers
 -keep class * extends androidx.work.Worker { *; }
 -keep class * extends androidx.work.CoroutineWorker { *; }
+
+# AutoValue is a compile-time annotation processor pulled in transitively by Hilt/Room.
+# It has no runtime presence; suppress R8's missing-class error for it.
+-dontwarn com.google.auto.value.**
