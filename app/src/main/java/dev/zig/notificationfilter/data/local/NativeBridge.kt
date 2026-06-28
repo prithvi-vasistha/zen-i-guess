@@ -12,5 +12,6 @@ object NativeBridge {
     external fun removeAppFromManaged(pkg: String)
     external fun addContactToWhitelist(contact: String)
     external fun addKeywordRuleToWhitelist(joinedKeywords: String)
+    external fun clearKeywordWhitelist()
     external fun containsWhitelistedKeyword(content: String): Boolean
 }

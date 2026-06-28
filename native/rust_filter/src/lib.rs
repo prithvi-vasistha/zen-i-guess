@@ -141,6 +141,19 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_r
     // write lock poisoned → skip silently; set remains consistent
 }
 
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_clearKeywordWhitelist<
+    'local,
+>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    if let Ok(mut rules) = init_vec(&KEYWORD_WHITELIST).write() {
+        rules.clear();
+    }
+    // write lock poisoned → skip silently; caller will repopulate from Room
+}
+
 // ── Contact whitelist ─────────────────────────────────────────────────────────
 
 #[no_mangle]
