@@ -9,6 +9,7 @@ plugins {
 android {
     namespace = "dev.zig.notificationfilter"
     compileSdk = 34
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "dev.zig.notificationfilter"
@@ -18,6 +19,10 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += setOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -80,4 +85,35 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+// ── Rust native library ───────────────────────────────────────────────────────
+
+// Ensures cargo-ndk is installed on the build machine, installing it if absent.
+// cargo-ndk wraps cargo to cross-compile for Android ABIs and place .so files
+// in the correct jniLibs subdirectories automatically.
+val ensureCargoNdk by tasks.registering(Exec::class) {
+    commandLine(
+        "sh", "-c",
+        "cargo ndk --version >/dev/null 2>&1 || cargo install cargo-ndk"
+    )
+}
+
+// Compiles the Rust filter engine for both required ABIs and places the output
+// .so files under app/src/main/jniLibs/, where AGP picks them up for packaging.
+val buildRustLib by tasks.registering(Exec::class) {
+    dependsOn(ensureCargoNdk)
+    workingDir(rootProject.file("native/rust_filter"))
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "x86_64",
+        "-o", layout.projectDirectory.dir("src/main/jniLibs").asFile.absolutePath,
+        "--",
+        "build", "--release"
+    )
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(buildRustLib)
 }
