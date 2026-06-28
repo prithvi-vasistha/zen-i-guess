@@ -78,6 +78,10 @@ dependencies {
 
     implementation(libs.androidx.work.runtime.ktx)
 
+    // On-device LLM inference via Google LiteRT (MediaPipe Tasks GenAI).
+    // Pulls in TFLite native runtime; no INTERNET permission required.
+    implementation("com.google.mediapipe:tasks-genai:0.10.35")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.espresso.core)
