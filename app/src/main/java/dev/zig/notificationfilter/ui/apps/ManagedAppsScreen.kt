@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,13 +58,6 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            },
-            navigationIcon = {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = null,
-                    modifier = Modifier.padding(start = 16.dp),
-                )
             },
         )
 
