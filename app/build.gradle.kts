@@ -45,6 +45,12 @@ android {
     }
 }
 
+ksp {
+    // Room writes a versioned schema JSON to this directory on each build.
+    // These files must be committed — they are the source of truth for explicit migrations.
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
