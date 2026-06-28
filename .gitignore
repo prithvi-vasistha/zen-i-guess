@@ -1,3 +1,19 @@
+# Android build outputs
+build/
+app/build/
+*.apk
+*.aab
+*.ap_
+
+# Android local configuration — machine-specific, never commit
+local.properties
+
+# Gradle caches and daemon state
+.gradle/
+
+# IDE project files
+.idea/
+
 # Compiled class file
 *.class
 
