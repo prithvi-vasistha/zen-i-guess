@@ -9,6 +9,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.zig.notificationfilter.data.local.db.AppDatabase
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
+import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.NotificationLogDao
 import javax.inject.Singleton
 
@@ -26,7 +27,7 @@ object DatabaseModule {
         )
             // All future schema changes must be supplied here via addMigrations(Migration(...)).
             // fallbackToDestructiveMigration() must never be called on production builds.
-            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
             .build()
 
     @Provides
@@ -38,4 +39,9 @@ object DatabaseModule {
     @Singleton
     fun provideKeywordRuleDao(database: AppDatabase): KeywordRuleDao =
         database.keywordRuleDao()
+
+    @Provides
+    @Singleton
+    fun provideManagedAppDao(database: AppDatabase): ManagedAppDao =
+        database.managedAppDao()
 }

@@ -123,6 +123,24 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_c
     }
 }
 
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_removeAppFromManaged<
+    'local,
+>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    package_name: JString<'local>,
+) {
+    let name: String = match env.get_string(&package_name) {
+        Ok(s) => s.into(),
+        Err(_) => return,
+    };
+    if let Ok(mut set) = init_set(&MANAGED_APPS).write() {
+        set.remove(&name);
+    }
+    // write lock poisoned → skip silently; set remains consistent
+}
+
 // ── Contact whitelist ─────────────────────────────────────────────────────────
 
 #[no_mangle]

@@ -69,6 +69,8 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
+    implementation("androidx.compose.material:material-icons-core") // BOM-managed; ~200 KB; bell, chevron, menu icons
+    implementation(libs.hilt.navigation.compose)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
