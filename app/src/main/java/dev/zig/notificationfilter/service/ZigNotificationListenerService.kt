@@ -51,6 +51,13 @@ class ZigNotificationListenerService : NotificationListenerService() {
             return
         }
 
+        // Fast Check 3: keyword scan — a body substring match bypasses LLM inference.
+        if (NativeBridge.containsWhitelistedKeyword(content)) {
+            notificationPublisher.publish(packageName, title, content)
+            logAsync(sbn, packageName, title, status = "ALLOWED_KEYWORD", filterReason = "KEYWORD_WHITELIST")
+            return
+        }
+
         // AI Lane: all remaining managed-app notifications are evaluated by the on-device LLM.
         appScope.launch {
             val appName = try {

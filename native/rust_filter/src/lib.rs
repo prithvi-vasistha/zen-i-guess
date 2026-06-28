@@ -6,12 +6,20 @@ use std::sync::{OnceLock, RwLock};
 
 static MANAGED_APPS: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
 static CONTACT_WHITELIST: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
+static KEYWORD_WHITELIST: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
 
-/// Returns the RwLock for the given whitelist, initialising it on first access.
+/// Returns the RwLock for the given set, initialising it on first access.
 fn init_set(
     lock: &'static OnceLock<RwLock<HashSet<String>>>,
 ) -> &'static RwLock<HashSet<String>> {
     lock.get_or_init(|| RwLock::new(HashSet::new()))
+}
+
+/// Returns the RwLock for the given vec, initialising it on first access.
+fn init_vec(
+    lock: &'static OnceLock<RwLock<Vec<String>>>,
+) -> &'static RwLock<Vec<String>> {
+    lock.get_or_init(|| RwLock::new(Vec::new()))
 }
 
 // ── Managed apps (opt-in set) ─────────────────────────────────────────────────
@@ -56,6 +64,51 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_a
         set.insert(name);
     }
     // write lock poisoned → skip silently; set remains intact from last good state
+}
+
+// ── Keyword whitelist (substring scan) ───────────────────────────────────────
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_addKeywordToWhitelist<
+    'local,
+>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    keyword: JString<'local>,
+) {
+    let kw: String = match env.get_string(&keyword) {
+        Ok(s) => s.into(),
+        Err(_) => return,
+    };
+    if let Ok(mut vec) = init_vec(&KEYWORD_WHITELIST).write() {
+        vec.push(kw.to_lowercase());
+    }
+    // write lock poisoned → skip silently; existing keywords remain intact
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_containsWhitelistedKeyword<
+    'local,
+>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    content: JString<'local>,
+) -> jboolean {
+    let body: String = match env.get_string(&content) {
+        Ok(s) => s.into(),
+        Err(_) => return JNI_FALSE,
+    };
+    let body_lower = body.to_lowercase();
+    match init_vec(&KEYWORD_WHITELIST).read() {
+        Ok(vec) => {
+            if vec.iter().any(|kw| body_lower.contains(kw.as_str())) {
+                JNI_TRUE
+            } else {
+                JNI_FALSE
+            }
+        }
+        Err(_) => JNI_FALSE, // lock poisoned — fail safe
+    }
 }
 
 // ── Contact whitelist ─────────────────────────────────────────────────────────

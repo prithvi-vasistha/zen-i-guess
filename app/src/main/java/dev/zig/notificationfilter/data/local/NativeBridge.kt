@@ -10,4 +10,6 @@ object NativeBridge {
     external fun isContactWhitelisted(contact: String): Boolean
     external fun addAppToManaged(pkg: String)
     external fun addContactToWhitelist(contact: String)
+    external fun addKeywordToWhitelist(keyword: String)
+    external fun containsWhitelistedKeyword(content: String): Boolean
 }
