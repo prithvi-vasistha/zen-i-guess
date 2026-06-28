@@ -13,6 +13,9 @@
     <!-- Required for the OS to bind to our NotificationListenerService -->
     <uses-permission android:name="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" />
 
+    <!-- Required to post notifications on API 33+. Granted at runtime in the onboarding Activity. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".ZigApp"
         android:allowBackup="false"
