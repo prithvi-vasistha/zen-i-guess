@@ -5,6 +5,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -15,6 +16,9 @@ interface KeywordRuleDao {
 
     @Delete
     suspend fun delete(entity: KeywordRuleEntity)
+
+    @Update
+    suspend fun update(entity: KeywordRuleEntity)
 
     @Query("SELECT * FROM keyword_rule ORDER BY id ASC")
     fun getAll(): Flow<List<KeywordRuleEntity>>

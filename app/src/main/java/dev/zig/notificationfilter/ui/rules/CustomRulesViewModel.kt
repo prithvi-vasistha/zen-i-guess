@@ -36,6 +36,22 @@ class CustomRulesViewModel @Inject constructor(
         }
     }
 
+    fun updateRule(entity: KeywordRuleEntity, rawInput: String) {
+        val conditions = rawInput.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (conditions.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            keywordRuleDao.update(entity.copy(conditions = conditions))
+            // Rebuild Rust KEYWORD_WHITELIST from post-update snapshot — same pattern as deleteRule.
+            val remaining = keywordRuleDao.getAllSnapshot()
+            NativeBridge.clearKeywordWhitelist()
+            remaining.forEach { rule ->
+                NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
+            }
+        }
+    }
+
     fun deleteRule(entity: KeywordRuleEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             keywordRuleDao.delete(entity)

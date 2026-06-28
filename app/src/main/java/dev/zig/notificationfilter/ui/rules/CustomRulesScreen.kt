@@ -16,7 +16,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,13 +30,17 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -48,10 +54,25 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
     val viewModel: CustomRulesViewModel = hiltViewModel()
     val rules by viewModel.rules.collectAsState()
     var inputText by rememberSaveable { mutableStateOf("") }
+    // Int? survives config changes via rememberSaveable without needing Parcelable.
+    var editingRuleId by rememberSaveable { mutableStateOf<Int?>(null) }
+    val isEditing = editingRuleId != null
+    val focusRequester = remember { FocusRequester() }
 
-    val onAddClicked = {
+    // Bring the keyboard up and focus the text field whenever edit mode is entered.
+    LaunchedEffect(editingRuleId) {
+        if (editingRuleId != null) focusRequester.requestFocus()
+    }
+
+    val onSaveOrAdd: () -> Unit = {
         if (inputText.isNotBlank()) {
-            viewModel.addRule(inputText)
+            if (isEditing) {
+                val target = rules.find { it.id == editingRuleId }
+                if (target != null) viewModel.updateRule(target, inputText)
+                editingRuleId = null
+            } else {
+                viewModel.addRule(inputText)
+            }
             inputText = ""
         }
     }
@@ -97,13 +118,17 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onAddClicked() }),
-                modifier = Modifier.weight(1f),
+                keyboardActions = KeyboardActions(onDone = { onSaveOrAdd() }),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
             )
-            IconButton(onClick = { onAddClicked() }) {
+            IconButton(onClick = { onSaveOrAdd() }) {
                 Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add rule",
+                    imageVector = if (isEditing) Icons.Default.Check else Icons.Default.Add,
+                    contentDescription = if (isEditing) "Save rule" else "Add rule",
+                    tint = if (isEditing) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface,
                 )
             }
         }
@@ -133,7 +158,20 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 items(rules, key = { it.id }) { rule ->
                     RuleRow(
                         rule = rule,
-                        onDelete = { viewModel.deleteRule(rule) },
+                        isBeingEdited = rule.id == editingRuleId,
+                        onEdit = {
+                            editingRuleId = rule.id
+                            inputText = rule.conditions.joinToString(", ")
+                        },
+                        onDelete = {
+                            // Exit edit mode before deleting so the text field doesn't retain
+                            // stale content from the rule that's about to be removed.
+                            if (editingRuleId == rule.id) {
+                                editingRuleId = null
+                                inputText = ""
+                            }
+                            viewModel.deleteRule(rule)
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -146,6 +184,8 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun RuleRow(
     rule: KeywordRuleEntity,
+    isBeingEdited: Boolean,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -175,6 +215,14 @@ private fun RuleRow(
                     label = { Text(condition) },
                 )
             }
+        }
+        IconButton(onClick = onEdit) {
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Edit rule",
+                tint = if (isBeingEdited) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         IconButton(onClick = onDelete) {
             Icon(
