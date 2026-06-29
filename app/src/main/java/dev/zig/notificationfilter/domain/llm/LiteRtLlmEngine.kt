@@ -40,6 +40,8 @@ class LiteRtLlmEngine @Inject constructor(
             Reply with exactly one word: TRUE or FALSE.
 
             TRUE if the notification is:
+            - Some Human Stranger Reaching out
+            - Notifications about a person now being reachable
             - OTP or verification code
             - Bank debit or credit
             - UPI transaction
