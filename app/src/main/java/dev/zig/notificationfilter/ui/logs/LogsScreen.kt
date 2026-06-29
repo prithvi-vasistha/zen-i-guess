@@ -14,14 +14,18 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -32,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -70,6 +75,7 @@ private fun formatTimestamp(epochMs: Long): String =
 fun LogsScreen(modifier: Modifier = Modifier) {
     val viewModel: LogsViewModel = hiltViewModel()
     val traces by viewModel.traces.collectAsState()
+    val query by viewModel.searchQuery.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -97,13 +103,40 @@ fun LogsScreen(modifier: Modifier = Modifier) {
             },
         )
 
+        OutlinedTextField(
+            value = query,
+            onValueChange = { viewModel.setQuery(it) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            placeholder = {
+                Text(
+                    text = "Search — app:, status:, msg: or bare term",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            leadingIcon = {
+                Icon(imageVector = Icons.Default.Search, contentDescription = null)
+            },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { viewModel.setQuery("") }) {
+                        Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear search")
+                    }
+                }
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            textStyle = MaterialTheme.typography.bodySmall,
+        )
+
         if (traces.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No logs yet.",
+                    text = if (query.isBlank()) "No logs yet." else "No results for \"$query\".",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
