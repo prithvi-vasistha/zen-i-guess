@@ -20,7 +20,13 @@ sealed class ZigScreen(
         iconRes = R.drawable.ic_nav_rules,
     )
 
+    data object Logs : ZigScreen(
+        route = "logs",
+        label = "Logs",
+        iconRes = R.drawable.ic_nav_logs,
+    )
+
     companion object {
-        val all = listOf(Apps, Rules)
+        val all = listOf(Apps, Rules, Logs)
     }
 }

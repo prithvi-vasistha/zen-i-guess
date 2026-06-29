@@ -15,6 +15,12 @@ interface NotificationLogDao {
     @Query("SELECT * FROM notification_log ORDER BY timestamp DESC")
     fun getAll(): Flow<List<NotificationLogEntity>>
 
+    @Query("SELECT * FROM notification_log ORDER BY timestamp DESC LIMIT 100")
+    fun getRecentLogs(): Flow<List<NotificationLogEntity>>
+
     @Query("DELETE FROM notification_log WHERE timestamp <= :thresholdTime")
     suspend fun deleteLogsOlderThan(thresholdTime: Long)
+
+    @Query("DELETE FROM notification_log")
+    suspend fun deleteAll()
 }
