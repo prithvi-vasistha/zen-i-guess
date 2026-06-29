@@ -35,46 +35,35 @@ class LiteRtLlmEngine @Inject constructor(
         // {metadataBlock} in a triple-quoted string is not Kotlin interpolation — it is
         // a literal placeholder replaced at call time via String.replace().
         private val PROMPT_TEMPLATE = """
-            You are a binary notification classifier.
-            Your job is to determine whether the notification requires immediate or near-term attention.
+            You are a strict notification spam filter for a privacy-focused Android app.
+            Your only job: decide if this notification genuinely needs the user's immediate human attention.
             Reply with exactly one word: TRUE or FALSE.
 
-            TRUE if the notification is:
-            - Some Human Stranger Reaching out
-            - Notifications about a person now being reachable
-            - OTP or verification code
-            - Bank debit or credit
-            - UPI transaction
-            - Card payment
-            - Security alert
-            - Suspicious login
-            - Password change
-            - Ride arrival
-            - Driver assigned
-            - Food arriving
-            - Package arriving today
-            - Bill due
-            - Calendar reminder
-            - Meeting reminder
-            - Travel update
-            - Flight or train delay
-            - Emergency alert
+            RULE: When the commercial or promotional intent is even slightly possible, always answer FALSE.
 
-            FALSE if the notification is:
-            - Advertisement
-            - Promotion
-            - Sale
-            - Coupon
-            - Cashback
-            - Newsletter
-            - News
-            - Social media activity
-            - Likes
-            - Comments
-            - Recommendations
-            - Entertainment
-            - App update
-            - Feature announcement
+            TRUE only if the notification is clearly one of:
+            - A personal message from a real human (SMS, WhatsApp, Telegram, iMessage, etc.)
+            - A stranger or unknown person reaching out directly
+            - OTP, verification code, or 2FA code
+            - Bank transaction: debit, credit, UPI transfer, or card payment
+            - Security alert: suspicious login, password changed, account breach
+            - Delivery update: ride arriving, driver assigned, food arriving, package arriving today
+            - Calendar event, meeting reminder, or alarm
+            - Emergency alert or travel disruption (flight delay, train cancelled)
+
+            FALSE for ALL of the following — no exceptions:
+            - Any body text containing these words (case-insensitive): CASHBACK, CASH BACK,
+              OFFER, DISCOUNT, SALE, DEAL, EARN, REWARD, REFER, REFERRAL, FREE, LUCKY,
+              PRIZE, WIN, WINNER, LOAN, PRE-APPROVED, CREDIT LIMIT, UPGRADE NOW,
+              LIMITED TIME, HURRY, EXPIRES, CLICK HERE, TAP TO CLAIM
+            - Promotional or marketing messages from any brand, business, or service
+            - Referral programs ("refer a friend", "invite and earn", etc.)
+            - Bulk SMS that advertises a product, account, or financial product
+            - App feature announcements, tips, or onboarding nudges
+            - Social media activity: likes, comments, new followers, trending posts
+            - News, articles, sports scores, or entertainment updates
+            - App update available or changelog notifications
+            - Any notification where a business is asking the user to take a commercial action
 
             Examples:
 
@@ -107,6 +96,28 @@ class LiteRtLlmEngine @Inject constructor(
             Title: Deals
             Body: Weekend Sale! Flat 70% off on shoes.
             Channel ID: marketing_channel
+            Timestamp: 1719600000000
+            Answer:
+            FALSE
+
+            Notification:
+            Package Name: com.google.android.apps.messaging
+            App Name: Messages
+            Category: msg
+            Title: AD-650022-P
+            Body: Earn Rs.250 CASHBACK! Refer a friend to open a Safe Second Account with us today.
+            Channel ID: promo_sms
+            Timestamp: 1719600000000
+            Answer:
+            FALSE
+
+            Notification:
+            Package Name: net.one97.paytm
+            App Name: Paytm
+            Category: None
+            Title: Exclusive for you
+            Body: You are PRE-APPROVED for a Rs.50,000 personal loan! Tap to claim now.
+            Channel ID: offers_channel
             Timestamp: 1719600000000
             Answer:
             FALSE

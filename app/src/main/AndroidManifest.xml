@@ -69,6 +69,19 @@
             </intent-filter>
         </service>
 
+        <!--
+            Receives explicit broadcasts from PendingIntents created by NotificationPublisher
+            for the "Dismiss" and "Open ZiG" notification action buttons.
+            Not exported: only ZiG itself sends these broadcasts.
+        -->
+        <receiver
+            android:name=".service.NotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.zig.notificationfilter.action.DISMISS" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

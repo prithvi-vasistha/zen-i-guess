@@ -19,8 +19,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.app.NotificationManagerCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
+import dev.zig.notificationfilter.domain.NotificationPublisher
 import dev.zig.notificationfilter.ui.MainScreen
 import dev.zig.notificationfilter.ui.theme.ZigTheme
 import javax.inject.Inject
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        dismissNotificationIfRequested(intent)
         enableEdgeToEdge()
         setContent {
             ZigTheme {
@@ -45,17 +48,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Handles the case where MainActivity is already running — Android calls onNewIntent
+    // instead of onCreate when FLAG_ACTIVITY_CLEAR_TOP brings an existing instance to front.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        dismissNotificationIfRequested(intent)
+    }
+
+    private fun dismissNotificationIfRequested(intent: Intent?) {
+        val notifId = intent?.getIntExtra(
+            NotificationPublisher.EXTRA_ZIG_NOTIF_TO_DISMISS, Int.MIN_VALUE,
+        ) ?: return
+        if (notifId != Int.MIN_VALUE) {
+            NotificationManagerCompat.from(this).cancel(notifId)
+        }
+    }
+
     // Called every time the user navigates back to the app — including after returning
     // from the Notification Listener Settings screen. The dialog auto-dismisses because
     // nlsGranted flips to true and PermissionBootstrapper recomposes.
     //
-    // requestSyncIfNeeded() fires the first contact sync after the user grants
-    // READ_CONTACTS via the runtime prompt. It is a no-op on every subsequent resume
-    // because ContactsSyncManager.initialSyncDone is set on the first invocation.
+    // register() is permission-gated and idempotent — it attaches the ContentObserver
+    // the first time READ_CONTACTS is granted and is a no-op on every resume after that.
+    // requestSyncIfNeeded() fires the initial contact sync once permission is held.
     override fun onResume() {
         super.onResume()
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
         nlsGranted = flat != null && flat.contains(packageName)
+        contactsSyncManager.register()
         contactsSyncManager.requestSyncIfNeeded()
     }
 }

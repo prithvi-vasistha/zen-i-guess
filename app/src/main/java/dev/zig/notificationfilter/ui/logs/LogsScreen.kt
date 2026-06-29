@@ -172,6 +172,16 @@ private fun TraceCard(trace: NotificationTrace) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            if (trace.content.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = trace.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
             HorizontalDivider()

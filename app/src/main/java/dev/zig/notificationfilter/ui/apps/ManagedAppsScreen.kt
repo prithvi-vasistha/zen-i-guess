@@ -163,9 +163,12 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SetupBanner() {
+    val context = LocalContext.current
     Card(
+        onClick = { context.startActivity(Intent("android.settings.NOTIFICATION_SETTINGS")) },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),

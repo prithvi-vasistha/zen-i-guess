@@ -19,10 +19,26 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class ZigNotificationListenerService : NotificationListenerService() {
 
+    companion object {
+        // Nullable reference used by NotificationActionReceiver to call cancelNotification().
+        // Volatile because the receiver reads it from a different thread.
+        @Volatile var instance: ZigNotificationListenerService? = null
+    }
+
     @Inject lateinit var dao: NotificationLogDao
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     @Inject lateinit var llmEngine: LlmEngine
     @Inject lateinit var notificationPublisher: NotificationPublisher
+
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        instance = this
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        instance = null
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         // Launch on appScope (Dispatchers.IO + SupervisorJob) so the entire pipeline
@@ -36,11 +52,33 @@ class ZigNotificationListenerService : NotificationListenerService() {
     }
 
     private suspend fun evaluateNotification(sbn: StatusBarNotification) {
-        val jobId = UUID.randomUUID().toString().take(8)
         val packageName = sbn.packageName
+
+        // ── Pre-flight structural filters ──────────────────────────────────────
+        // These drop noise before entering the tracked pipeline — no log row,
+        // no UUID, no DB write. Order matters: cheapest checks first.
+
+        // 1. ZiG's own forwarded notifications must never re-enter the pipeline.
+        if (packageName == this.packageName) return
+
+        // 2. Ongoing notifications are background tasks, syncs, and media players.
+        if (sbn.isOngoing) return
+
+        // 3. OS service and system-category notifications are infrastructure noise.
+        val notifCategory = sbn.notification?.category
+        if (notifCategory == Notification.CATEGORY_SERVICE ||
+            notifCategory == Notification.CATEGORY_SYSTEM) return
+
+        // 4. Notifications with no visible text are shell/update pings — nothing to show.
         val title = resolveTitle(sbn)
         val content = sbn.notification?.extras
             ?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        if (title.isBlank() && content.isBlank()) return
+        // ──────────────────────────────────────────────────────────────────────
+
+        val jobId = UUID.randomUUID().toString().take(8)
+        val contentIntent = sbn.notification?.contentIntent
+        val originalKey = sbn.key
 
         log(jobId, packageName, title, content, "RECEIVED",
             "Notification arrived from $packageName")
@@ -58,7 +96,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (NativeBridge.isContactWhitelisted(title.trim().lowercase())) {
             log(jobId, packageName, title, content, "CONTACT_PASS",
                 "Title \"$title\" matched contact whitelist")
-            notificationPublisher.publish(packageName, title, content)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
             return
@@ -70,7 +108,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (NativeBridge.containsWhitelistedKeyword(content)) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
                 "Body matched a keyword rule")
-            notificationPublisher.publish(packageName, title, content)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
             return
@@ -105,7 +143,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         if (allowed) {
             log(jobId, packageName, title, content, "LLM_ALLOWED", "Model returned: TRUE")
-            notificationPublisher.publish(packageName, title, content)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via LLM decision")
         } else {

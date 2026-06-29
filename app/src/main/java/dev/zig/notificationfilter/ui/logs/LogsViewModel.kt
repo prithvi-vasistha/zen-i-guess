@@ -17,6 +17,7 @@ data class NotificationTrace(
     val jobId: String,
     val packageName: String,
     val title: String,
+    val content: String,
     val firstTimestamp: Long,
     val steps: List<NotificationLogEntity>,
 )
@@ -39,6 +40,7 @@ class LogsViewModel @Inject constructor(
                         jobId = ordered.first().jobId,
                         packageName = ordered.first().packageName,
                         title = ordered.first().title,
+                        content = ordered.first().content,
                         firstTimestamp = ordered.first().timestamp,
                         steps = ordered,
                     )
