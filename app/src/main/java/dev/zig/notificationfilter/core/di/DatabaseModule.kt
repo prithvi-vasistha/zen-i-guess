@@ -27,7 +27,11 @@ object DatabaseModule {
         )
             // All future schema changes must be supplied here via addMigrations(Migration(...)).
             // fallbackToDestructiveMigration() must never be called on production builds.
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+            )
             .build()
 
     @Provides

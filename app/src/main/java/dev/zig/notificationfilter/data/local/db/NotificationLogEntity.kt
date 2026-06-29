@@ -6,15 +6,16 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "notification_log",
-    indices = [Index(value = ["timestamp"])]
+    indices = [Index(value = ["timestamp"]), Index(value = ["jobId"])]
 )
 data class NotificationLogEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
+    val jobId: String = "",
     val packageName: String,
     val title: String,
     val content: String,
     val filterReason: String,
     val status: String,
-    val timestamp: Long
+    val timestamp: Long,
 )

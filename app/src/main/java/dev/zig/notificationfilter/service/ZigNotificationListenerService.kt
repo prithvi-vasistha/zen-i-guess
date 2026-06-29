@@ -13,99 +13,103 @@ import dev.zig.notificationfilter.domain.NotificationPublisher
 import dev.zig.notificationfilter.domain.llm.LlmEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class ZigNotificationListenerService : NotificationListenerService() {
 
     @Inject lateinit var dao: NotificationLogDao
-
-    @Inject
-    @ApplicationScope
-    lateinit var appScope: CoroutineScope
-
+    @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     @Inject lateinit var llmEngine: LlmEngine
     @Inject lateinit var notificationPublisher: NotificationPublisher
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        evaluateNotification(sbn)
+        // Launch on appScope (Dispatchers.IO + SupervisorJob) so the entire pipeline
+        // including all dao.insert() calls runs off the main thread. A crash in one
+        // notification's coroutine does not affect others.
+        appScope.launch { evaluateNotification(sbn) }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         // TODO: Forward to removal pipeline
     }
 
-    private fun evaluateNotification(sbn: StatusBarNotification) {
+    private suspend fun evaluateNotification(sbn: StatusBarNotification) {
+        val jobId = UUID.randomUUID().toString().take(8)
         val packageName = sbn.packageName
         val title = resolveTitle(sbn)
         val content = sbn.notification?.extras
             ?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
-        // Fast Check 1: opt-in gate — notifications from unmanaged apps are ignored entirely.
-        if (!NativeBridge.isAppManaged(packageName)) return
+        log(jobId, packageName, title, content, "RECEIVED",
+            "Notification arrived from $packageName")
 
-        // Fast Check 2: whitelisted contacts skip LLM inference and are published immediately.
+        // Gate 1: opt-in managed apps list
+        if (!NativeBridge.isAppManaged(packageName)) {
+            log(jobId, packageName, title, content, "MANAGED_FAIL",
+                "App not in managed list — dropped")
+            return
+        }
+        log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
+
+        // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses LLM)
         if (NativeBridge.isContactWhitelisted(title)) {
+            log(jobId, packageName, title, content, "CONTACT_PASS",
+                "Title \"$title\" matched contact whitelist")
             notificationPublisher.publish(packageName, title, content)
-            logAsync(sbn, packageName, title, status = "ALLOWED_CONTACT", filterReason = "CONTACT_WHITELIST")
+            log(jobId, packageName, title, content, "PUBLISHED",
+                "Forwarded to user via contact whitelist")
             return
         }
+        log(jobId, packageName, title, content, "CONTACT_MISS",
+            "Title \"$title\" not in contact whitelist")
 
-        // Fast Check 3: keyword scan — a body substring match bypasses LLM inference.
+        // Gate 3: keyword rules (Tier 2 — deterministic, bypasses LLM)
         if (NativeBridge.containsWhitelistedKeyword(content)) {
+            log(jobId, packageName, title, content, "KEYWORD_PASS",
+                "Body matched a keyword rule")
             notificationPublisher.publish(packageName, title, content)
-            logAsync(sbn, packageName, title, status = "ALLOWED_KEYWORD", filterReason = "KEYWORD_WHITELIST")
+            log(jobId, packageName, title, content, "PUBLISHED",
+                "Forwarded to user via keyword match")
             return
         }
+        log(jobId, packageName, title, content, "KEYWORD_MISS",
+            "No keyword rule matched — escalating to LLM")
 
-        // AI Lane: all remaining managed-app notifications are evaluated by the on-device LLM.
-        appScope.launch {
-            val appName = try {
-                val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-                packageManager.getApplicationLabel(info).toString()
-            } catch (_: PackageManager.NameNotFoundException) {
-                packageName
-            }
+        // LLM lane: on-device model evaluates notifications that passed all Rust gates
+        val appName = try {
+            val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+            packageManager.getApplicationLabel(info).toString()
+        } catch (_: PackageManager.NameNotFoundException) {
+            packageName
+        }
 
-            val category = sbn.notification?.category ?: "None"
-            val channelId = sbn.notification?.channelId ?: "None"
+        val category = sbn.notification?.category ?: "None"
+        val channelId = sbn.notification?.channelId ?: "None"
 
-            val notificationMetadataBlock = """
-                Package Name: $packageName
-                App Name: $appName
-                Category: $category
-                Title: $title
-                Body: $content
-                Channel ID: $channelId
-                Timestamp: ${sbn.postTime}
-            """.trimIndent()
+        val metadataBlock = """
+            Package Name: $packageName
+            App Name: $appName
+            Category: $category
+            Title: $title
+            Body: $content
+            Channel ID: $channelId
+            Timestamp: ${sbn.postTime}
+        """.trimIndent()
 
-            val allowed = llmEngine.evaluate(notificationMetadataBlock)
+        log(jobId, packageName, title, content, "LLM_INVOKED",
+            "Sending to on-device LLM for evaluation")
+        val allowed = llmEngine.evaluate(metadataBlock)
 
-            if (allowed) {
-                notificationPublisher.publish(packageName, title, content)
-                dao.insert(
-                    NotificationLogEntity(
-                        packageName = packageName,
-                        title = title,
-                        content = content,
-                        filterReason = "LLM_INFERENCE",
-                        status = "ALLOWED_LLM",
-                        timestamp = sbn.postTime,
-                    )
-                )
-            } else {
-                dao.insert(
-                    NotificationLogEntity(
-                        packageName = packageName,
-                        title = title,
-                        content = content,
-                        filterReason = "LLM_INFERENCE",
-                        status = "BLOCKED_LLM",
-                        timestamp = sbn.postTime,
-                    )
-                )
-            }
+        if (allowed) {
+            log(jobId, packageName, title, content, "LLM_ALLOWED", "Model returned: TRUE")
+            notificationPublisher.publish(packageName, title, content)
+            log(jobId, packageName, title, content, "PUBLISHED",
+                "Forwarded to user via LLM decision")
+        } else {
+            log(jobId, packageName, title, content, "LLM_BLOCKED",
+                "Model returned: FALSE — notification suppressed")
         }
     }
 
@@ -116,26 +120,24 @@ class ZigNotificationListenerService : NotificationListenerService() {
             ?: ""
     }
 
-    private fun logAsync(
-        sbn: StatusBarNotification,
+    private suspend fun log(
+        jobId: String,
         packageName: String,
         title: String,
+        content: String,
         status: String,
-        filterReason: String,
+        reason: String,
     ) {
-        val content = sbn.notification?.extras
-            ?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-        appScope.launch {
-            dao.insert(
-                NotificationLogEntity(
-                    packageName = packageName,
-                    title = title,
-                    content = content,
-                    filterReason = filterReason,
-                    status = status,
-                    timestamp = sbn.postTime,
-                )
-            )
-        }
+        dao.insert(
+            NotificationLogEntity(
+                jobId = jobId,
+                packageName = packageName,
+                title = title,
+                content = content,
+                status = status,
+                filterReason = reason,
+                timestamp = System.currentTimeMillis(),
+            ),
+        )
     }
 }
