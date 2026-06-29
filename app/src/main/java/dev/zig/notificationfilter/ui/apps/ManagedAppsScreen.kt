@@ -1,6 +1,9 @@
 package dev.zig.notificationfilter.ui.apps
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,26 +17,38 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -43,6 +58,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun ManagedAppsScreen(modifier: Modifier = Modifier) {
     val viewModel: ManagedAppsViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Search query lives in the composable — filtering is a UI concern on an already-loaded list.
+    var searchQuery by rememberSaveable { mutableStateOf("") }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
@@ -68,20 +88,75 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
                 CircularProgressIndicator()
             }
         } else {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search apps…") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear search",
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { keyboardController?.hide() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+
+            val displayedApps = if (searchQuery.isBlank()) {
+                uiState.apps
+            } else {
+                uiState.apps.filter { it.appName.contains(searchQuery, ignoreCase = true) }
+            }
+
             Text(
                 text = "Installed Apps",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            LazyColumn {
-                items(uiState.apps, key = { it.packageName }) { app ->
-                    AppRow(
-                        app = app,
-                        onToggle = { viewModel.setManaged(app.packageName, it) },
+
+            if (displayedApps.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No apps match \"$searchQuery\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Inset divider aligned to the start of the app name column
-                    HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
+                }
+            } else {
+                LazyColumn {
+                    items(displayedApps, key = { it.packageName }) { app ->
+                        AppRow(
+                            app = app,
+                            onToggle = { viewModel.setManaged(app.packageName, it) },
+                            onOpenSettings = {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                        .putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName),
+                                )
+                            },
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
+                    }
                 }
             }
         }
@@ -134,11 +209,15 @@ private fun SetupBanner() {
 private fun AppRow(
     app: ManagedAppsViewModel.InstalledApp,
     onToggle: (Boolean) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            // Tapping the icon/name area opens the app's notification settings in Android.
+            // Switch consumes its own touch events so onOpenSettings never fires from the Switch.
+            .clickable { onOpenSettings() }
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Image(

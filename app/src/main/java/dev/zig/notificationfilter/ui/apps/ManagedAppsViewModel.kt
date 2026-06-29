@@ -60,14 +60,22 @@ class ManagedAppsViewModel @Inject constructor(
         } else {
             UiState(
                 isLoading = false,
-                apps = raw.map { app ->
-                    InstalledApp(
-                        packageName = app.packageName,
-                        appName = app.appName,
-                        icon = app.icon,
-                        isManaged = app.packageName in managed,
-                    )
-                },
+                apps = raw
+                    .map { app ->
+                        InstalledApp(
+                            packageName = app.packageName,
+                            appName = app.appName,
+                            icon = app.icon,
+                            isManaged = app.packageName in managed,
+                        )
+                    }
+                    // Managed apps pinned to the top; alphabetical within each group.
+                    // Re-evaluated on every managed-state change so a toggled app
+                    // moves immediately without a manual scroll.
+                    .sortedWith(
+                        compareByDescending<InstalledApp> { it.isManaged }
+                            .thenBy { it.appName.lowercase() },
+                    ),
             )
         }
     }.stateIn(
@@ -104,7 +112,6 @@ class ManagedAppsViewModel @Inject constructor(
                         icon = loadIcon(pm, appInfo),
                     )
                 }
-                .sortedBy { it.appName.lowercase() }
             rawApps.value = apps
         }
     }
