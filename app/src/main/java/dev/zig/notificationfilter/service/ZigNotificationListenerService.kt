@@ -54,7 +54,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
 
         // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses LLM)
-        if (NativeBridge.isContactWhitelisted(title)) {
+        // Lookup is lowercased to match the normalised names stored by ContactsSyncManager.
+        if (NativeBridge.isContactWhitelisted(title.trim().lowercase())) {
             log(jobId, packageName, title, content, "CONTACT_PASS",
                 "Title \"$title\" matched contact whitelist")
             notificationPublisher.publish(packageName, title, content)

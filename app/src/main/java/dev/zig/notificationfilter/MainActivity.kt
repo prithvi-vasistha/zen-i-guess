@@ -20,8 +20,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import dagger.hilt.android.AndroidEntryPoint
+import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.ui.MainScreen
 import dev.zig.notificationfilter.ui.theme.ZigTheme
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -29,6 +31,8 @@ class MainActivity : ComponentActivity() {
     // Compose state: changes in onResume() automatically trigger recomposition of
     // PermissionBootstrapper without needing lifecycle-runtime-compose as a dependency.
     private var nlsGranted by mutableStateOf(false)
+
+    @Inject lateinit var contactsSyncManager: ContactsSyncManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,10 +48,15 @@ class MainActivity : ComponentActivity() {
     // Called every time the user navigates back to the app — including after returning
     // from the Notification Listener Settings screen. The dialog auto-dismisses because
     // nlsGranted flips to true and PermissionBootstrapper recomposes.
+    //
+    // requestSyncIfNeeded() fires the first contact sync after the user grants
+    // READ_CONTACTS via the runtime prompt. It is a no-op on every subsequent resume
+    // because ContactsSyncManager.initialSyncDone is set on the first invocation.
     override fun onResume() {
         super.onResume()
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
         nlsGranted = flat != null && flat.contains(packageName)
+        contactsSyncManager.requestSyncIfNeeded()
     }
 }
 

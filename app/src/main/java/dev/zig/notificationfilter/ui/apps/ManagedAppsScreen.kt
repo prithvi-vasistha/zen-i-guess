@@ -213,38 +213,46 @@ private fun AppRow(
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            // Tapping the icon/name area opens the app's notification settings in Android.
-            // Switch consumes its own touch events so onOpenSettings never fires from the Switch.
-            .clickable { onOpenSettings() }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Image(
-            bitmap = app.icon,
-            contentDescription = null,
+        // Left zone: tapping the icon or name area opens the app's notification settings.
+        // Isolated from the Switch so the Switch's enforced 48×48dp minimum touch target
+        // cannot intercept taps intended for the name area.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .size(40.dp)
-                .clip(RoundedCornerShape(8.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = app.appName,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
+                .weight(1f)
+                .clickable { onOpenSettings() }
+                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
+        ) {
+            Image(
+                bitmap = app.icon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp)),
             )
-            Text(
-                text = app.packageName,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = app.appName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = app.packageName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
+        // Right zone: Switch is outside the clickable area so it handles only toggle events.
         Switch(
             checked = app.isManaged,
             onCheckedChange = onToggle,
+            modifier = Modifier.padding(end = 16.dp),
         )
     }
 }

@@ -196,3 +196,16 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_a
         set.insert(name);
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_clearContactWhitelist<
+    'local,
+>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    if let Ok(mut set) = init_set(&CONTACT_WHITELIST).write() {
+        set.clear();
+    }
+    // write lock poisoned → skip silently; caller will repopulate from ContactsContract
+}
