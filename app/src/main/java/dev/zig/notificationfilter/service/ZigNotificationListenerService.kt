@@ -103,8 +103,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
-            // No review row: contact whitelist is a deterministic user-defined rule.
-            // The user already decided this sender is trusted — no ML label needed.
+            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS")
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -117,7 +116,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
-            // No review row: keyword rules are deterministic user-defined rules.
+            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS")
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
