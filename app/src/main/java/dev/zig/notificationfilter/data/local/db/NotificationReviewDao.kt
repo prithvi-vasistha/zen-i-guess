@@ -38,6 +38,15 @@ interface NotificationReviewDao {
     @Query("UPDATE notification_review SET reviewState = :state, syncStatus = 'UNPROCESSED' WHERE id = :id")
     suspend fun updateReviewState(id: Long, state: String)
 
+    // LLM-blocked notifications older than the 24-hour active window — shown on the Archive screen.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE systemDecision = 'LLM_BLOCKED'
+        AND timestamp < :cutoffTimestamp
+        ORDER BY timestamp DESC
+    """)
+    fun getArchivedNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>>
+
     // Called by the retraining WorkManager to fetch only rows that need to be
     // written to the master training CSV — avoids scanning the full table nightly.
     @Query("SELECT * FROM notification_review WHERE syncStatus = 'UNPROCESSED'")
