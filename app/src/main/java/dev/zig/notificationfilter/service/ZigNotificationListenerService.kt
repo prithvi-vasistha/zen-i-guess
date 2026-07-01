@@ -103,7 +103,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
-            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS")
+            // No review row: contact whitelist is a deterministic user-defined rule.
+            // The user already decided this sender is trusted — no ML label needed.
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -116,7 +117,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
-            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS")
+            // No review row: keyword rules are deterministic user-defined rules.
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -152,7 +153,9 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via LLM decision")
-            review(jobId, packageName, title, content, sbn.postTime, "LLM_ALLOWED")
+            // systemDecision="PUBLISHED" groups all LLM-allowed rows under one label so the
+            // review screen can show them alongside suppressed rows in a full history view.
+            review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED")
         } else {
             log(jobId, packageName, title, content, "LLM_BLOCKED",
                 "Model returned: FALSE — notification suppressed")

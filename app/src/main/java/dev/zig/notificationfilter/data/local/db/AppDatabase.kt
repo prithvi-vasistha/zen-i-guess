@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     version = 5,
     exportSchema = true,
 )
-@TypeConverters(StringListConverter::class)
+@TypeConverters(StringListConverter::class, ReviewEnumConverters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notificationLogDao(): NotificationLogDao

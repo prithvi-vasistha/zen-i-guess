@@ -20,11 +20,12 @@ data class NotificationReviewEntity(
     val title: String,
     val content: String,
     val timestamp: Long,
-    // Terminal pipeline stage that produced this row: LLM_BLOCKED, MANAGED_FAIL,
-    // LLM_ALLOWED, CONTACT_PASS, KEYWORD_PASS. Drives which rows appear in the review inbox.
+    // Terminal pipeline stage that produced this row: LLM_BLOCKED, MANAGED_FAIL, PUBLISHED.
+    // Drives which rows appear in the review inbox — stored as raw String so new stage
+    // names can be added without a DB migration.
     val systemDecision: String,
-    // Kotlin defaults mirror the SQL DEFAULTs in MIGRATION_4_5 so both new inserts
-    // and upgraded rows start in the correct state.
-    val reviewState: String = ReviewState.PENDING.name,
-    val syncStatus: String = SyncStatus.UNPROCESSED.name,
+    // Enum types — Room uses ReviewEnumConverters to store these as TEXT in SQLite.
+    // Kotlin defaults mirror the SQL DEFAULTs in MIGRATION_4_5 so upgraded rows start correctly.
+    val reviewState: ReviewState = ReviewState.PENDING,
+    val syncStatus: SyncStatus = SyncStatus.UNPROCESSED,
 )
