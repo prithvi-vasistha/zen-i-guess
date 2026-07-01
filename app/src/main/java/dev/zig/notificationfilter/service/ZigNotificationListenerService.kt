@@ -9,6 +9,8 @@ import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.NotificationLogDao
 import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
+import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
+import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.domain.NotificationPublisher
 import dev.zig.notificationfilter.domain.llm.LlmEngine
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +28,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
     }
 
     @Inject lateinit var dao: NotificationLogDao
+    @Inject lateinit var reviewDao: NotificationReviewDao
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     @Inject lateinit var llmEngine: LlmEngine
     @Inject lateinit var notificationPublisher: NotificationPublisher
@@ -87,6 +90,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (!NativeBridge.isAppManaged(packageName)) {
             log(jobId, packageName, title, content, "MANAGED_FAIL",
                 "App not in managed list — dropped")
+            review(jobId, packageName, title, content, sbn.postTime, "MANAGED_FAIL")
             return
         }
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
@@ -99,6 +103,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
+            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS")
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -111,6 +116,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
+            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS")
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -146,9 +152,11 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via LLM decision")
+            review(jobId, packageName, title, content, sbn.postTime, "LLM_ALLOWED")
         } else {
             log(jobId, packageName, title, content, "LLM_BLOCKED",
                 "Model returned: FALSE — notification suppressed")
+            review(jobId, packageName, title, content, sbn.postTime, "LLM_BLOCKED")
         }
     }
 
@@ -176,6 +184,26 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 status = status,
                 filterReason = reason,
                 timestamp = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    private suspend fun review(
+        jobId: String,
+        packageName: String,
+        title: String,
+        content: String,
+        timestamp: Long,
+        systemDecision: String,
+    ) {
+        reviewDao.insert(
+            NotificationReviewEntity(
+                jobId = jobId,
+                packageName = packageName,
+                title = title,
+                content = content,
+                timestamp = timestamp,
+                systemDecision = systemDecision,
             ),
         )
     }

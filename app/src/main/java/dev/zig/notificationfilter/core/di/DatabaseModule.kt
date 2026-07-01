@@ -11,6 +11,7 @@ import dev.zig.notificationfilter.data.local.db.AppDatabase
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.NotificationLogDao
+import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import javax.inject.Singleton
 
 @Module
@@ -31,6 +32,7 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_1_2,
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
             )
             .build()
 
@@ -48,4 +50,9 @@ object DatabaseModule {
     @Singleton
     fun provideManagedAppDao(database: AppDatabase): ManagedAppDao =
         database.managedAppDao()
+
+    @Provides
+    @Singleton
+    fun provideNotificationReviewDao(database: AppDatabase): NotificationReviewDao =
+        database.notificationReviewDao()
 }
