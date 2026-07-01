@@ -6,8 +6,11 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.ReviewState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -38,7 +41,20 @@ class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
 ) : ViewModel() {
 
-    val uiState: StateFlow<ReviewUiState> = dao.getFilteredNotificationsFlow()
+    private companion object {
+        private const val TWENTY_FOUR_HOURS_MS = 24L * 60L * 60L * 1_000L
+        // Re-subscribe to the DAO every hour so stale items age out of the window
+        // without requiring a new notification to trigger a DB emission.
+        private const val CUTOFF_REFRESH_INTERVAL_MS = 60L * 60L * 1_000L
+    }
+
+    val uiState: StateFlow<ReviewUiState> = flow {
+            while (true) {
+                emit(System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS)
+                delay(CUTOFF_REFRESH_INTERVAL_MS)
+            }
+        }
+        .flatMapLatest { cutoff -> dao.getFilteredNotificationsFlow(cutoff) }
         .map { entities ->
             if (entities.isEmpty()) {
                 ReviewUiState.Empty
@@ -58,7 +74,6 @@ class NotificationReviewViewModel @Inject constructor(
             }
         }
         // Push the entity→UiItem mapping and groupBy off the main thread.
-        // Dispatchers.Default is correct here — this is CPU work, not IO.
         .flowOn(Dispatchers.Default)
         .stateIn(
             scope = viewModelScope,

@@ -12,20 +12,23 @@ interface NotificationReviewDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: NotificationReviewEntity)
 
-    // Full suppressed-notification inbox — shown on the review screen regardless of
-    // whether the user has acted on each item yet.
+    // Active review inbox: LLM-suppressed notifications within the rolling 24-hour window.
+    // MANAGED_FAIL rows are excluded — those notifications never passed the managed-apps gate
+    // so they are not meaningful candidates for user review.
+    // cutoffTimestamp = System.currentTimeMillis() - 24h, recomputed hourly by the ViewModel.
     @Query("""
         SELECT * FROM notification_review
-        WHERE systemDecision IN ('LLM_BLOCKED', 'MANAGED_FAIL')
+        WHERE systemDecision = 'LLM_BLOCKED'
+        AND timestamp >= :cutoffTimestamp
         ORDER BY timestamp DESC
     """)
-    fun getFilteredNotificationsFlow(): Flow<List<NotificationReviewEntity>>
+    fun getFilteredNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>>
 
     // Unreviewed suppressed notifications only — useful for badge counts and "needs action" views.
     @Query("""
         SELECT * FROM notification_review
         WHERE reviewState = 'PENDING'
-        AND systemDecision IN ('LLM_BLOCKED', 'MANAGED_FAIL')
+        AND systemDecision = 'LLM_BLOCKED'
         ORDER BY timestamp DESC
     """)
     fun getPendingReviewFlow(): Flow<List<NotificationReviewEntity>>
