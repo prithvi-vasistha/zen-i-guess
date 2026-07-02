@@ -41,6 +41,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
+import dev.zig.notificationfilter.ui.common.ClipboardDoodle
+import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
 import java.time.Instant
 import java.time.ZoneId
@@ -108,7 +110,7 @@ fun LogsScreen(modifier: Modifier = Modifier) {
             onValueChange = { viewModel.setQuery(it) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             placeholder = {
                 Text(
                     text = "Search — app:, status:, msg: or bare term",
@@ -131,15 +133,22 @@ fun LogsScreen(modifier: Modifier = Modifier) {
         )
 
         if (traces.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (query.isBlank()) "No logs yet." else "No results for \"$query\".",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (query.isBlank()) {
+                ZigEmptyState(
+                    title = "No logs yet",
+                    doodle = { ClipboardDoodle() },
                 )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No results for \"$query\".",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -156,7 +165,7 @@ private fun TraceCard(trace: NotificationTrace) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
 

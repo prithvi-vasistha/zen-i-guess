@@ -1,7 +1,6 @@
 package dev.zig.notificationfilter.ui.rules
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -46,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
+import dev.zig.notificationfilter.ui.common.BookDoodle
+import dev.zig.notificationfilter.ui.common.ZigEmptyState
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -133,18 +134,11 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
         )
 
         if (rules.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = "No rules yet. Add keywords above.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            ZigEmptyState(
+                title = "No rules yet",
+                subtitle = "Add keywords above to get started.",
+                doodle = { BookDoodle() },
+            )
         } else {
             LazyColumn {
                 items(rules, key = { it.id }) { rule ->
