@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.service
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.content.pm.PackageManager
 import android.service.notification.NotificationListenerService
@@ -25,6 +26,11 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // Nullable reference used by NotificationActionReceiver to call cancelNotification().
         // Volatile because the receiver reads it from a different thread.
         @Volatile var instance: ZigNotificationListenerService? = null
+    }
+
+    // Initialized lazily so getSystemService() is called after onCreate().
+    private val keyguardManager: KeyguardManager by lazy {
+        getSystemService(KeyguardManager::class.java)
     }
 
     @Inject lateinit var dao: NotificationLogDao
@@ -95,12 +101,27 @@ class ZigNotificationListenerService : NotificationListenerService() {
         }
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
 
+        // Locked-screen bypass: VISIBILITY_PRIVATE notifications carry content the user
+        // explicitly marked secret. When the keyguard is active, Android may redact the
+        // text fields, making LLM evaluation meaningless and potentially leaking intent.
+        // Treat these as automatic VIPs: publish immediately and record LOCKED_PASS.
+        if (keyguardManager.isKeyguardLocked &&
+            sbn.notification?.visibility == Notification.VISIBILITY_PRIVATE) {
+            log(jobId, packageName, title, content, "LOCKED_PASS",
+                "Device locked + VISIBILITY_PRIVATE — bypassing ML pipeline")
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
+            log(jobId, packageName, title, content, "PUBLISHED",
+                "Forwarded to user via locked-screen bypass")
+            review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS")
+            return
+        }
+
         // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses LLM)
         // Lookup is lowercased to match the normalised names stored by ContactsSyncManager.
         if (NativeBridge.isContactWhitelisted(title.trim().lowercase())) {
             log(jobId, packageName, title, content, "CONTACT_PASS",
                 "Title \"$title\" matched contact whitelist")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
             review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS")
@@ -113,7 +134,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (NativeBridge.containsWhitelistedKeyword(content)) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
                 "Body matched a keyword rule")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
             review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS")
@@ -149,7 +170,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         if (allowed) {
             log(jobId, packageName, title, content, "LLM_ALLOWED", "Model returned: TRUE")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id)
+            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via LLM decision")
             // systemDecision="PUBLISHED" groups all LLM-allowed rows under one label so the

@@ -25,17 +25,17 @@ class NotificationPublisher @Inject constructor(
 ) {
 
     companion object {
-        private const val CHANNEL_ID = "resurrected_alerts"
+        // v2: rotated from "resurrected_alerts" — Android silently ignores importance
+        // upgrades to an already-registered channel ID, so a new ID forces a clean slate.
+        private const val CHANNEL_ID = "zig_alerts_v2"
+        private const val CHANNEL_ID_LEGACY = "resurrected_alerts"
         const val EXTRA_ZIG_NOTIF_TO_DISMISS = "zig_notif_to_dismiss"
     }
 
     init {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Important Alerts",
-            NotificationManager.IMPORTANCE_HIGH,
-        )
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.deleteNotificationChannel(CHANNEL_ID_LEGACY)
+        val channel = NotificationChannel(CHANNEL_ID, "Important Alerts", NotificationManager.IMPORTANCE_HIGH)
         manager.createNotificationChannel(channel)
     }
 
@@ -50,6 +50,7 @@ class NotificationPublisher @Inject constructor(
         contentIntent: PendingIntent?,
         originalKey: String,
         originalNotifId: Int,
+        originalCategory: String?,
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
@@ -104,6 +105,14 @@ class NotificationPublisher @Inject constructor(
             .setSmallIcon(R.drawable.ic_notification)
             .setLargeIcon(largeIcon)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // Category inherited from the original notification so Android's DND and
+            // call-interruption rules treat this the same as the source app's notification.
+            // Defaults to CATEGORY_MESSAGE when the original carried no category, which is
+            // the minimum required for heads-up display during an active phone call.
+            .setCategory(originalCategory ?: NotificationCompat.CATEGORY_MESSAGE)
+            // DEFAULT_ALL signals sound + vibration, which the OS requires before it will
+            // display a heads-up banner — even on a HIGH-importance channel.
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             // Tapping the notification body opens the original app and auto-dismisses.
             .setContentIntent(contentIntent)
             .setAutoCancel(true)
