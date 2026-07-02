@@ -8,6 +8,12 @@ sealed class ZigScreen(
     val label: String,
     @DrawableRes val iconRes: Int,
 ) {
+    data object Review : ZigScreen(
+        route = "review",
+        label = "Notifications",
+        iconRes = R.drawable.ic_nav_review,
+    )
+
     data object Apps : ZigScreen(
         route = "apps",
         label = "Apps",
@@ -27,6 +33,6 @@ sealed class ZigScreen(
     )
 
     companion object {
-        val all = listOf(Apps, Rules, Logs)
+        val all = listOf(Review, Apps, Rules, Logs)
     }
 }

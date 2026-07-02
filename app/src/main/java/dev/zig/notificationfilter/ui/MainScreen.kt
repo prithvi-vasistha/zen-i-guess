@@ -1,6 +1,8 @@
 package dev.zig.notificationfilter.ui
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -9,39 +11,32 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
-import androidx.navigation.NavDestination.Companion.hierarchy
-import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
-import dev.zig.notificationfilter.ui.navigation.ZigNavHost
+import androidx.compose.ui.text.style.TextOverflow
+import dev.zig.notificationfilter.ui.apps.ManagedAppsScreen
+import dev.zig.notificationfilter.ui.logs.LogsScreen
 import dev.zig.notificationfilter.ui.navigation.ZigScreen
+import dev.zig.notificationfilter.ui.review.NotificationReviewRoute
+import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
+import kotlinx.coroutines.launch
 
 @Composable
 fun MainScreen() {
-    val navController = rememberNavController()
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = backStackEntry?.destination
+    val pagerState = rememberPagerState(pageCount = { ZigScreen.all.size })
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         bottomBar = {
             NavigationBar {
-                ZigScreen.all.forEach { screen ->
-                    val selected = currentDestination
-                        ?.hierarchy
-                        ?.any { it.route == screen.route } == true
-
+                ZigScreen.all.forEachIndexed { index, screen ->
+                    val selected = pagerState.currentPage == index
                     NavigationBarItem(
                         selected = selected,
                         onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(index)
                             }
                         },
                         icon = {
@@ -50,7 +45,14 @@ fun MainScreen() {
                                 contentDescription = screen.label,
                             )
                         },
-                        label = { Text(screen.label) },
+                        label = {
+                            Text(
+                                text = screen.label,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = MaterialTheme.colorScheme.primary,
                             selectedTextColor = MaterialTheme.colorScheme.primary,
@@ -63,9 +65,16 @@ fun MainScreen() {
             }
         },
     ) { innerPadding ->
-        ZigNavHost(
-            navController = navController,
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier.padding(innerPadding),
-        )
+        ) { page ->
+            when (ZigScreen.all[page]) {
+                ZigScreen.Review -> NotificationReviewRoute()
+                ZigScreen.Apps -> ManagedAppsScreen()
+                ZigScreen.Rules -> CustomRulesScreen()
+                ZigScreen.Logs -> LogsScreen()
+            }
+        }
     }
 }

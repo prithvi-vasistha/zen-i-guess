@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import dev.zig.notificationfilter.ui.apps.ManagedAppsScreen
 import dev.zig.notificationfilter.ui.logs.LogsScreen
+import dev.zig.notificationfilter.ui.review.NotificationReviewRoute
 import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
 
 @Composable
@@ -16,9 +17,10 @@ fun ZigNavHost(
 ) {
     NavHost(
         navController = navController,
-        startDestination = ZigScreen.Apps.route,
+        startDestination = ZigScreen.Review.route,
         modifier = modifier,
     ) {
+        composable(ZigScreen.Review.route) { NotificationReviewRoute() }
         composable(ZigScreen.Apps.route) { ManagedAppsScreen() }
         composable(ZigScreen.Rules.route) { CustomRulesScreen() }
         composable(ZigScreen.Logs.route) { LogsScreen() }
