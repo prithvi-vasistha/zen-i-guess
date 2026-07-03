@@ -7,6 +7,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
 import dev.zig.notificationfilter.data.local.db.AppDatabase
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
@@ -33,6 +34,7 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_2_3,
                 AppDatabase.MIGRATION_3_4,
                 AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6,
             )
             .build()
 
@@ -55,4 +57,9 @@ object DatabaseModule {
     @Singleton
     fun provideNotificationReviewDao(database: AppDatabase): NotificationReviewDao =
         database.notificationReviewDao()
+
+    @Provides
+    @Singleton
+    fun provideAppCategoryOverrideDao(database: AppDatabase): AppCategoryOverrideDao =
+        database.appCategoryOverrideDao()
 }

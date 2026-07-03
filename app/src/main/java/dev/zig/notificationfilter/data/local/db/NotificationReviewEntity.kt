@@ -28,4 +28,15 @@ data class NotificationReviewEntity(
     // Kotlin defaults mirror the SQL DEFAULTs in MIGRATION_4_5 so upgraded rows start correctly.
     val reviewState: ReviewState = ReviewState.PENDING,
     val syncStatus: SyncStatus = SyncStatus.UNPROCESSED,
+    // ── Active learning telemetry (added in MIGRATION_5_6) ────────────────────
+    // Raw P(BLOCK) sigmoid output from the TFLite model. 0.0 for non-ML code paths.
+    val modelConfidence: Float = 0f,
+    // Category resolved by NotificationCategory.resolve() at inference time.
+    // Format: "CATEGORY_FINANCE", "CATEGORY_UNKNOWN", etc. "UNKNOWN" for non-ML paths.
+    val inferredCategory: String = "UNKNOWN",
+    // Nullable: non-null only when the user overrides the inferred category from the UI.
+    val userAssignedCategory: String? = null,
+    // User action on the model's decision. One of: "NONE", "MANUALLY_ALLOWED", "MANUALLY_BLOCKED".
+    // "NONE" = model's verdict stands. Stored as String so future states require no migration.
+    val userOverrideStatus: String = "NONE",
 )

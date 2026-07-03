@@ -163,25 +163,35 @@ class ZigNotificationListenerService : NotificationListenerService() {
         log(jobId, packageName, title, content, "MODEL_INVOKED",
             "Sending to on-device classifier [$category]")
 
-        val allowed = try {
+        val result = try {
             classifierEngine.evaluate(category, packageName, text)
         } catch (e: Exception) {
             log(jobId, packageName, title, content, "MODEL_ERROR",
                 "Inference failed: ${e.message} — failing open")
-            true
+            // Fail open: allow the notification and record zero confidence so the
+            // active learning loop can identify model errors in the training export.
+            dev.zig.notificationfilter.domain.classifier.ClassifierResult(
+                allowed = true,
+                confidence = 0f,
+                category = category,
+            )
         }
 
-        if (allowed) {
+        val inferredCategory = "CATEGORY_${result.category.name}"
+
+        if (result.allowed) {
             log(jobId, packageName, title, content, "MODEL_ALLOWED",
-                "Classifier score above threshold — forwarding")
+                "Classifier score ${result.confidence} above threshold — forwarding")
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via on-device classifier")
-            review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED")
+            review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED",
+                result.confidence, inferredCategory)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
-                "Classifier score below threshold — suppressed")
-            review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED")
+                "Classifier score ${result.confidence} below threshold — suppressed")
+            review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
+                result.confidence, inferredCategory)
         }
     }
 
@@ -220,6 +230,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
         content: String,
         timestamp: Long,
         systemDecision: String,
+        modelConfidence: Float = 0f,
+        inferredCategory: String = "UNKNOWN",
     ) {
         reviewDao.insert(
             NotificationReviewEntity(
@@ -229,6 +241,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 content = content,
                 timestamp = timestamp,
                 systemDecision = systemDecision,
+                modelConfidence = modelConfidence,
+                inferredCategory = inferredCategory,
             ),
         )
     }

@@ -12,8 +12,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         KeywordRuleEntity::class,
         ManagedAppEntity::class,
         NotificationReviewEntity::class,
+        AppCategoryOverrideEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 @TypeConverters(StringListConverter::class, ReviewEnumConverters::class)
@@ -23,6 +24,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun keywordRuleDao(): KeywordRuleDao
     abstract fun managedAppDao(): ManagedAppDao
     abstract fun notificationReviewDao(): NotificationReviewDao
+    abstract fun appCategoryOverrideDao(): AppCategoryOverrideDao
 
     companion object {
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -86,6 +88,37 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_notification_review_timestamp` " +
                         "ON `notification_review` (`timestamp`)"
+                )
+            }
+        }
+
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Active learning telemetry columns on notification_review.
+                // All existing rows get safe defaults: confidence=0, category=UNKNOWN,
+                // no user assignment, no user override.
+                db.execSQL(
+                    "ALTER TABLE `notification_review` ADD COLUMN `modelConfidence` REAL NOT NULL DEFAULT 0.0"
+                )
+                db.execSQL(
+                    "ALTER TABLE `notification_review` ADD COLUMN `inferredCategory` TEXT NOT NULL DEFAULT 'UNKNOWN'"
+                )
+                db.execSQL(
+                    // Nullable — no DEFAULT needed; existing rows receive NULL.
+                    "ALTER TABLE `notification_review` ADD COLUMN `userAssignedCategory` TEXT"
+                )
+                db.execSQL(
+                    "ALTER TABLE `notification_review` ADD COLUMN `userOverrideStatus` TEXT NOT NULL DEFAULT 'NONE'"
+                )
+                // App-level category override table.
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `app_category_override` (
+                        `packageName` TEXT NOT NULL,
+                        `defaultCategory` TEXT NOT NULL,
+                        PRIMARY KEY(`packageName`)
+                    )
+                    """.trimIndent()
                 )
             }
         }

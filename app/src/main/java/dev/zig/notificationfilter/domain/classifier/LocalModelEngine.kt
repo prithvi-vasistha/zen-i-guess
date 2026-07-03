@@ -69,7 +69,7 @@ class LocalModelEngine @Inject constructor(
         category: NotificationCategory,
         packageName: String,
         text: String,
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): ClassifierResult = withContext(Dispatchers.IO) {
         // Replicate the training format exactly: "[CATEGORY_XXX] | package.name | body text"
         // The tokenizer's preprocessing strips brackets, underscores, pipes, and dots so
         // the model sees: "category xxx package name body text" — same as during training.
@@ -83,7 +83,12 @@ class LocalModelEngine @Inject constructor(
 
         // output[0][0] = P(BLOCK) — label_map {"ALLOW": 0, "BLOCK": 1}.
         // Scores BELOW BLOCK_THRESHOLD are classified as ALLOW.
-        output[0][0] < BLOCK_THRESHOLD
+        val confidence = output[0][0]
+        ClassifierResult(
+            allowed = confidence < BLOCK_THRESHOLD,
+            confidence = confidence,
+            category = category,
+        )
     }
 
     // ── Tokenizer ─────────────────────────────────────────────────────────────

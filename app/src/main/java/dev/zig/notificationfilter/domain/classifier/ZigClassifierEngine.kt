@@ -5,5 +5,5 @@ interface ZigClassifierEngine {
         category: NotificationCategory,
         packageName: String,
         text: String,
-    ): Boolean
+    ): ClassifierResult
 }
