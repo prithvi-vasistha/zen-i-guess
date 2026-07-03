@@ -10,7 +10,9 @@ import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
+import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -67,6 +69,8 @@ class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
     private val overrideDao: AppCategoryOverrideDao,
     private val personalMemory: PersonalMemory,
+    private val preferences: ZigUserPreferences,
+    private val dailySummaryScheduler: DailySummaryScheduler,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -75,6 +79,17 @@ class NotificationReviewViewModel @Inject constructor(
         private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1_000L
         private const val CUTOFF_REFRESH_INTERVAL_MS = 60L * 60L * 1_000L
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d")
+    }
+
+    // ── Settings state ────────────────────────────────────────────────────────
+
+    private val _dailySummaryEnabled = MutableStateFlow(preferences.dailySummaryEnabled)
+    val dailySummaryEnabled: StateFlow<Boolean> = _dailySummaryEnabled.asStateFlow()
+
+    fun setDailySummaryEnabled(enabled: Boolean) {
+        preferences.dailySummaryEnabled = enabled
+        _dailySummaryEnabled.value = enabled
+        if (enabled) dailySummaryScheduler.schedule() else dailySummaryScheduler.cancel()
     }
 
     // ── Filter state ──────────────────────────────────────────────────────────

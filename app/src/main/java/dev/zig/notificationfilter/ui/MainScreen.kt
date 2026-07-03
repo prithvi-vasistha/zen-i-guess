@@ -11,6 +11,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -23,9 +24,17 @@ import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
 import kotlinx.coroutines.launch
 
 @Composable
-fun MainScreen() {
+fun MainScreen(startTab: Int = -1) {
     val pagerState = rememberPagerState(pageCount = { ZigScreen.all.size })
     val coroutineScope = rememberCoroutineScope()
+
+    // Jump to the requested tab when launched from a notification deep-link.
+    // scrollToItem (not animate) so there is no visible swipe on cold launch.
+    LaunchedEffect(startTab) {
+        if (startTab in ZigScreen.all.indices) {
+            pagerState.scrollToPage(startTab)
+        }
+    }
 
     Scaffold(
         bottomBar = {

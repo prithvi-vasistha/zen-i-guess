@@ -32,9 +32,11 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Switch
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
@@ -138,6 +140,7 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
     val categoryOverrides by viewModel.categoryOverrides.collectAsState()
     val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -170,6 +173,8 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
         onUndoClicked = viewModel::onUndoClicked,
         onSetCategoryOverride = viewModel::setCategoryOverride,
         onSetUserCategory = viewModel::setUserAssignedCategory,
+        dailySummaryEnabled = dailySummaryEnabled,
+        onDailySummaryToggled = viewModel::setDailySummaryEnabled,
         modifier = modifier,
     )
 }
@@ -199,8 +204,12 @@ private fun NotificationReviewScreen(
     onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
+    dailySummaryEnabled: Boolean,
+    onDailySummaryToggled: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showSettingsMenu by remember { mutableStateOf(false) }
+
     Scaffold(
         modifier = modifier,
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -215,6 +224,44 @@ private fun NotificationReviewScreen(
                 actions = {
                     TextButton(onClick = onToggleArchive) {
                         Text(if (showArchive) "Active" else "Archive")
+                    }
+                    Box {
+                        IconButton(onClick = { showSettingsMenu = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showSettingsMenu,
+                            onDismissRequest = { showSettingsMenu = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Daily Summary",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                            Text(
+                                                text = "8 PM recap notification",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = dailySummaryEnabled,
+                                            onCheckedChange = onDailySummaryToggled,
+                                        )
+                                    }
+                                },
+                                onClick = { onDailySummaryToggled(!dailySummaryEnabled) },
+                            )
+                        }
                     }
                 },
             )

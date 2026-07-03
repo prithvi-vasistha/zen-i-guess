@@ -24,6 +24,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.domain.NotificationPublisher
 import dev.zig.notificationfilter.ui.MainScreen
+import dev.zig.notificationfilter.ui.navigation.ZigScreen
 import dev.zig.notificationfilter.ui.theme.ZigTheme
 import javax.inject.Inject
 
@@ -34,16 +35,21 @@ class MainActivity : ComponentActivity() {
     // PermissionBootstrapper without needing lifecycle-runtime-compose as a dependency.
     private var nlsGranted by mutableStateOf(false)
 
+    // Index of the tab to scroll to on launch (from a notification deep-link).
+    // Defaults to -1 (no override). Set before setContent so the first composition reads it.
+    private var startTab by mutableStateOf(-1)
+
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        startTab = resolveStartTab(intent)
         dismissNotificationIfRequested(intent)
         enableEdgeToEdge()
         setContent {
             ZigTheme {
                 PermissionBootstrapper(nlsGranted = nlsGranted)
-                MainScreen()
+                MainScreen(startTab = startTab)
             }
         }
     }
@@ -52,7 +58,16 @@ class MainActivity : ComponentActivity() {
     // instead of onCreate when FLAG_ACTIVITY_CLEAR_TOP brings an existing instance to front.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        startTab = resolveStartTab(intent)
         dismissNotificationIfRequested(intent)
+    }
+
+    private fun resolveStartTab(intent: Intent?): Int {
+        val target = intent?.getStringExtra(NotificationPublisher.EXTRA_NAVIGATE_TO) ?: return -1
+        return when (target) {
+            NotificationPublisher.NAV_TARGET_REVIEW -> ZigScreen.all.indexOf(ZigScreen.Review)
+            else -> -1
+        }
     }
 
     private fun dismissNotificationIfRequested(intent: Intent?) {
