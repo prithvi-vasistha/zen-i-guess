@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.ui.onboarding
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -48,6 +49,7 @@ fun TermsAndConditionsScreen(onAccepted: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.systemBars),
     ) {
         Column(
