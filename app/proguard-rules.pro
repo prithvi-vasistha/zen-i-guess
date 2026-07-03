@@ -19,3 +19,8 @@
 # AutoValue is a compile-time annotation processor pulled in transitively by Hilt/Room.
 # It has no runtime presence; suppress R8's missing-class error for it.
 -dontwarn com.google.auto.value.**
+
+# javax.lang.model.* is the Java compiler annotation-processing API. MediaPipe tasks-text
+# bundles AutoValue/JavaPoet code that references these classes, but they are never called
+# at runtime on Android (they only exist in the JDK, not the Android SDK). Safe to ignore.
+-dontwarn javax.lang.model.**
