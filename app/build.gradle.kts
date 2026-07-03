@@ -107,9 +107,11 @@ dependencies {
     // app/src/main/assets/text_embedder.tflite, whose in-graph SentencePiece custom op
     // (TFSentencepieceTokenizeOp) the bare LiteRT runtime cannot resolve — tasks-text
     // bundles that op. 100% on-device, no network. Provides TextEmbedder + cosineSimilarity.
-    // TODO: Verify 16KB alignment for tasks-text JNI on Android 15. libmediapipe_tasks_text_jni.so
-    //  ships prebuilt; if it crashes on 16 KB-page devices, force alignment via packagingOptions.
-    implementation("com.google.mediapipe:tasks-text:0.10.21")
+    // 0.10.35: the JNI moved to tasks-core as libmediapipe_tasks_jni.so, built 16 KB
+    // page-aligned (0x4000). 0.10.21 shipped a 4 KB-only libmediapipe_tasks_text_jni.so,
+    // which forced Android 15 page-size compatibility mode. The TextEmbedder API used in
+    // MediaPipeTextEmbedder is unchanged, and 0.10.35 pulls no litert artifact transitively.
+    implementation("com.google.mediapipe:tasks-text:0.10.35")
 
     // Force the 16 KB page-aligned build of this AndroidX library.
     // The version pulled in transitively by Compose is not aligned; 1.0.1 is.
