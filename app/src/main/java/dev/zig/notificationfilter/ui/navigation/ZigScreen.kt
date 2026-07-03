@@ -33,6 +33,10 @@ sealed class ZigScreen(
     )
 
     companion object {
-        val all = listOf(Review, Apps, Rules, Logs)
+        // Logs is a developer-only debugging surface. The `Logs` entry is commented out of the
+        // navigable set so it never appears in the bottom bar or the onboarding tour. To re-enable
+        // it for development, uncomment it below and uncomment its step in Tour.kt. The Logs screen
+        // itself is kept fully intact in code.
+        val all = listOf(Review, Apps, Rules /*, Logs */)
     }
 }
