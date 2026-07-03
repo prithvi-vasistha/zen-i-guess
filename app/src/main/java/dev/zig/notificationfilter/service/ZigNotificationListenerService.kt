@@ -2,7 +2,7 @@ package dev.zig.notificationfilter.service
 
 import android.app.KeyguardManager
 import android.app.Notification
-import android.content.pm.PackageManager
+// import android.content.pm.PackageManager  // Phase 1: unused — restored if needed in future lanes
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import dagger.hilt.android.AndroidEntryPoint
@@ -13,7 +13,8 @@ import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.domain.NotificationPublisher
-import dev.zig.notificationfilter.domain.llm.LlmEngine
+import dev.zig.notificationfilter.domain.classifier.NotificationCategory
+import dev.zig.notificationfilter.domain.classifier.ZigClassifierEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -36,7 +37,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
     @Inject lateinit var dao: NotificationLogDao
     @Inject lateinit var reviewDao: NotificationReviewDao
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
-    @Inject lateinit var llmEngine: LlmEngine
+    @Inject lateinit var classifierEngine: ZigClassifierEngine
     @Inject lateinit var notificationPublisher: NotificationPublisher
 
     override fun onListenerConnected() {
@@ -103,7 +104,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         // Locked-screen bypass: VISIBILITY_PRIVATE notifications carry content the user
         // explicitly marked secret. When the keyguard is active, Android may redact the
-        // text fields, making LLM evaluation meaningless and potentially leaking intent.
+        // text fields, making classifier evaluation meaningless and potentially leaking intent.
         // Treat these as automatic VIPs: publish immediately and record LOCKED_PASS.
         if (keyguardManager.isKeyguardLocked &&
             sbn.notification?.visibility == Notification.VISIBILITY_PRIVATE) {
@@ -116,7 +117,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses LLM)
+        // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses classifier)
         // Lookup is lowercased to match the normalised names stored by ContactsSyncManager.
         if (NativeBridge.isContactWhitelisted(title.trim().lowercase())) {
             log(jobId, packageName, title, content, "CONTACT_PASS",
@@ -130,7 +131,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         log(jobId, packageName, title, content, "CONTACT_MISS",
             "Title \"$title\" not in contact whitelist")
 
-        // Gate 3: keyword rules (Tier 2 — deterministic, bypasses LLM)
+        // Gate 3: keyword rules (Tier 2 — deterministic, bypasses classifier)
         if (NativeBridge.containsWhitelistedKeyword(content)) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
                 "Body matched a keyword rule")
@@ -141,45 +142,46 @@ class ZigNotificationListenerService : NotificationListenerService() {
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
-            "No keyword rule matched — escalating to LLM")
+            "No keyword rule matched — escalating to on-device classifier")
 
-        // LLM lane: on-device model evaluates notifications that passed all Rust gates
-        val appName = try {
-            val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
-            packageManager.getApplicationLabel(info).toString()
-        } catch (_: PackageManager.NameNotFoundException) {
-            packageName
+        // ── Phase 1 LLM lane (archived) ────────────────────────────────────────
+        // val appName = try {
+        //     val info = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
+        //     packageManager.getApplicationLabel(info).toString()
+        // } catch (_: PackageManager.NameNotFoundException) { packageName }
+        // val metadataBlock = "Package Name: $packageName\nApp Name: $appName\n..."
+        // log(jobId, ..., "LLM_INVOKED", ...)
+        // val allowed = llmEngine.evaluate(metadataBlock)
+        // ──────────────────────────────────────────────────────────────────────
+
+        // Classifier lane: on-device TFLite model evaluates notifications that
+        // passed all deterministic gates. Fails open (allows) if the model is not
+        // yet installed, logging MODEL_ERROR so the issue is visible in the Logs tab.
+        val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
+        val category = NotificationCategory.resolve(packageName, text)
+
+        log(jobId, packageName, title, content, "MODEL_INVOKED",
+            "Sending to on-device classifier [$category]")
+
+        val allowed = try {
+            classifierEngine.evaluate(category, packageName, text)
+        } catch (e: Exception) {
+            log(jobId, packageName, title, content, "MODEL_ERROR",
+                "Inference failed: ${e.message} — failing open")
+            true
         }
 
-        val category = sbn.notification?.category ?: "None"
-        val channelId = sbn.notification?.channelId ?: "None"
-
-        val metadataBlock = """
-            Package Name: $packageName
-            App Name: $appName
-            Category: $category
-            Title: $title
-            Body: $content
-            Channel ID: $channelId
-            Timestamp: ${sbn.postTime}
-        """.trimIndent()
-
-        log(jobId, packageName, title, content, "LLM_INVOKED",
-            "Sending to on-device LLM for evaluation")
-        val allowed = llmEngine.evaluate(metadataBlock)
-
         if (allowed) {
-            log(jobId, packageName, title, content, "LLM_ALLOWED", "Model returned: TRUE")
+            log(jobId, packageName, title, content, "MODEL_ALLOWED",
+                "Classifier score above threshold — forwarding")
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via LLM decision")
-            // systemDecision="PUBLISHED" groups all LLM-allowed rows under one label so the
-            // review screen can show them alongside suppressed rows in a full history view.
+                "Forwarded to user via on-device classifier")
             review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED")
         } else {
-            log(jobId, packageName, title, content, "LLM_BLOCKED",
-                "Model returned: FALSE — notification suppressed")
-            review(jobId, packageName, title, content, sbn.postTime, "LLM_BLOCKED")
+            log(jobId, packageName, title, content, "MODEL_BLOCKED",
+                "Classifier score below threshold — suppressed")
+            review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED")
         }
     }
 

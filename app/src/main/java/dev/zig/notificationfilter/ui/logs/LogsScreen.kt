@@ -58,9 +58,11 @@ private val COLOR_NEUTRAL = Color(0xFF90A4AE)
 private fun statusColor(status: String): Color = when (status) {
     "RECEIVED" -> COLOR_BLUE
     "MANAGED_PASS", "CONTACT_MISS", "KEYWORD_MISS" -> COLOR_NEUTRAL
-    "MANAGED_FAIL", "LLM_BLOCKED" -> COLOR_RED
-    "CONTACT_PASS", "KEYWORD_PASS", "LLM_ALLOWED", "PUBLISHED" -> COLOR_GREEN
-    "LLM_INVOKED" -> COLOR_AMBER
+    "MANAGED_FAIL", "MODEL_BLOCKED", "LLM_BLOCKED" -> COLOR_RED
+    "CONTACT_PASS", "KEYWORD_PASS", "MODEL_ALLOWED", "PUBLISHED",
+    "LLM_ALLOWED" -> COLOR_GREEN
+    "MODEL_INVOKED", "LLM_INVOKED" -> COLOR_AMBER
+    "MODEL_ERROR" -> COLOR_RED
     else -> COLOR_NEUTRAL // legacy single-step rows or unknown future stages
 }
 

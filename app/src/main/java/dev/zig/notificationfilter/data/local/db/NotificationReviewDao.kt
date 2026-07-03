@@ -12,13 +12,14 @@ interface NotificationReviewDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: NotificationReviewEntity)
 
-    // Active review inbox: LLM-suppressed notifications within the rolling 24-hour window.
+    // Active review inbox: classifier-suppressed notifications within the rolling 24-hour window.
     // MANAGED_FAIL rows are excluded — those notifications never passed the managed-apps gate
     // so they are not meaningful candidates for user review.
     // cutoffTimestamp = System.currentTimeMillis() - 24h, recomputed hourly by the ViewModel.
+    // IN clause covers legacy LLM_BLOCKED rows (Phase 1) and new MODEL_BLOCKED rows (Phase 2+).
     @Query("""
         SELECT * FROM notification_review
-        WHERE systemDecision = 'LLM_BLOCKED'
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
         AND timestamp >= :cutoffTimestamp
         ORDER BY timestamp DESC
     """)
@@ -28,7 +29,7 @@ interface NotificationReviewDao {
     @Query("""
         SELECT * FROM notification_review
         WHERE reviewState = 'PENDING'
-        AND systemDecision = 'LLM_BLOCKED'
+        AND systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
         ORDER BY timestamp DESC
     """)
     fun getPendingReviewFlow(): Flow<List<NotificationReviewEntity>>
@@ -38,10 +39,10 @@ interface NotificationReviewDao {
     @Query("UPDATE notification_review SET reviewState = :state, syncStatus = 'UNPROCESSED' WHERE id = :id")
     suspend fun updateReviewState(id: Long, state: String)
 
-    // LLM-blocked notifications older than the 24-hour active window — shown on the Archive screen.
+    // Classifier-blocked notifications older than the 24-hour active window — shown on the Archive screen.
     @Query("""
         SELECT * FROM notification_review
-        WHERE systemDecision = 'LLM_BLOCKED'
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
         AND timestamp < :cutoffTimestamp
         ORDER BY timestamp DESC
     """)

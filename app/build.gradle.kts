@@ -48,6 +48,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Prevent AGP from compressing the TFLite model inside the APK.
+    // Without this, memory-mapping the model via AssetFileDescriptor fails at runtime.
+    aaptOptions {
+        noCompress.add("tflite")
+    }
 }
 
 ksp {
@@ -81,9 +87,19 @@ dependencies {
 
     implementation(libs.androidx.work.runtime.ktx)
 
-    // On-device LLM inference via Google LiteRT (MediaPipe Tasks GenAI).
-    // Pulls in TFLite native runtime; no INTERNET permission required.
-    implementation("com.google.mediapipe:tasks-genai:0.10.35")
+    // Phase 1: MediaPipe / LiteRT dependency disabled (kept as reference).
+    // implementation("com.google.mediapipe:tasks-genai:0.10.35")
+
+    // Phase 2: Standard TFLite runtime + Support Library for on-device classification.
+    // tensorflow-lite: Interpreter, model loading, tensor I/O.
+    // tensorflow-lite-support: TensorBuffer and label utilities (used in future phases).
+    // 2.16.1: first release with 16 KB page-aligned .so files (Android 15 compatibility).
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+
+    // Force the 16 KB page-aligned build of this AndroidX library.
+    // The version pulled in transitively by Compose is not aligned; 1.0.1 is.
+    implementation("androidx.graphics:graphics-path:1.0.1")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)
