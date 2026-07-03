@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -37,7 +35,9 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -101,11 +101,16 @@ private fun formatReviewTimestamp(epochMs: Long): String =
         .atZone(ZoneId.systemDefault())
         .format(REVIEW_TIME_FORMATTER)
 
-private fun SortBy.displayLabel(): String = when (this) {
-    SortBy.TIME_DESC -> "Newest"
-    SortBy.TIME_ASC  -> "Oldest"
-    SortBy.APP_NAME  -> "App A–Z"
-    SortBy.STATUS    -> "Status"
+private fun SortField.displayLabel(): String = when (this) {
+    SortField.TIME     -> "Time"
+    SortField.APP_NAME -> "App Name"
+    SortField.STATUS   -> "Status"
+}
+
+private fun SortDirection.displayLabel(sortField: SortField): String = when (sortField) {
+    SortField.TIME     -> if (this == SortDirection.DESC) "Newest first" else "Oldest first"
+    SortField.APP_NAME -> if (this == SortDirection.DESC) "Z → A" else "A → Z"
+    SortField.STATUS   -> if (this == SortDirection.DESC) "Blocked first" else "Allowed first"
 }
 
 private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
@@ -132,7 +137,8 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
         showArchive = showArchive,
         onToggleArchive = { showArchive = !showArchive },
         onQueryChange = viewModel::setQuery,
-        onSortChange = viewModel::setSortBy,
+        onSortFieldChange = viewModel::setSortField,
+        onSortDirectionChange = viewModel::setSortDirection,
         onAllowClicked = viewModel::onAllowClicked,
         onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
         onUndoClicked = viewModel::onUndoClicked,
@@ -155,7 +161,8 @@ private fun NotificationReviewScreen(
     showArchive: Boolean,
     onToggleArchive: () -> Unit,
     onQueryChange: (String) -> Unit,
-    onSortChange: (SortBy) -> Unit,
+    onSortFieldChange: (SortField) -> Unit,
+    onSortDirectionChange: (SortDirection) -> Unit,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
@@ -214,22 +221,20 @@ private fun NotificationReviewScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SortBy.entries.forEach { sort ->
-                    FilterChip(
-                        selected = filter.sortBy == sort,
-                        onClick = { onSortChange(sort) },
-                        label = {
-                            Text(
-                                text = sort.displayLabel(),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        },
-                    )
-                }
+                SortFieldMenu(
+                    current = filter.sortField,
+                    onSelect = onSortFieldChange,
+                    modifier = Modifier.weight(1f),
+                )
+                SortDirectionMenu(
+                    current = filter.sortDirection,
+                    sortField = filter.sortField,
+                    onSelect = onSortDirectionChange,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             when (activeState) {
@@ -252,6 +257,95 @@ private fun NotificationReviewScreen(
                         onSetUserCategory = onSetUserCategory,
                     )
                 }
+            }
+        }
+    }
+}
+
+// ── Sort dropdowns ────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortFieldMenu(
+    current: SortField,
+    onSelect: (SortField) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = current.displayLabel(),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Sort by", style = MaterialTheme.typography.labelSmall) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodySmall,
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            SortField.entries.forEach { field ->
+                DropdownMenuItem(
+                    text = { Text(field.displayLabel(), style = MaterialTheme.typography.bodySmall) },
+                    onClick = {
+                        onSelect(field)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SortDirectionMenu(
+    current: SortDirection,
+    sortField: SortField,
+    onSelect: (SortDirection) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier,
+    ) {
+        OutlinedTextField(
+            value = current.displayLabel(sortField),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Order", style = MaterialTheme.typography.labelSmall) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                .fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodySmall,
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            SortDirection.entries.forEach { direction ->
+                DropdownMenuItem(
+                    text = { Text(direction.displayLabel(sortField), style = MaterialTheme.typography.bodySmall) },
+                    onClick = {
+                        onSelect(direction)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                )
             }
         }
     }

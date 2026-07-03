@@ -72,8 +72,12 @@ class NotificationReviewViewModel @Inject constructor(
         _filter.value = _filter.value.copy(query = query)
     }
 
-    fun setSortBy(sortBy: SortBy) {
-        _filter.value = _filter.value.copy(sortBy = sortBy)
+    fun setSortField(sortField: SortField) {
+        _filter.value = _filter.value.copy(sortField = sortField)
+    }
+
+    fun setSortDirection(sortDirection: SortDirection) {
+        _filter.value = _filter.value.copy(sortDirection = sortDirection)
     }
 
     // ── Cutoff ticker (shared between active and archive) ─────────────────────
@@ -92,7 +96,7 @@ class NotificationReviewViewModel @Inject constructor(
         Pair(cutoff, filter)
     }.flatMapLatest { (cutoff, filter) ->
         dao.searchActiveFlow(cutoff, filter.query)
-            .map { list -> list.applySort(filter.sortBy).toReviewUiState() }
+            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toReviewUiState() }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -108,7 +112,7 @@ class NotificationReviewViewModel @Inject constructor(
         Pair(cutoff, filter)
     }.flatMapLatest { (cutoff, filter) ->
         dao.searchArchiveFlow(cutoff, filter.query)
-            .map { list -> list.applySort(filter.sortBy).toReviewUiState() }
+            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toReviewUiState() }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -207,13 +211,17 @@ class NotificationReviewViewModel @Inject constructor(
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private fun List<NotificationReviewEntity>.applySort(sortBy: SortBy): List<NotificationReviewEntity> =
-        when (sortBy) {
-            SortBy.TIME_DESC -> sortedByDescending { it.timestamp }
-            SortBy.TIME_ASC  -> sortedBy { it.timestamp }
-            SortBy.APP_NAME  -> sortedBy { it.packageName }
-            SortBy.STATUS    -> sortedBy { statusSortKey(it.userOverrideStatus) }
+    private fun List<NotificationReviewEntity>.applySort(
+        sortField: SortField,
+        sortDirection: SortDirection,
+    ): List<NotificationReviewEntity> {
+        val sorted = when (sortField) {
+            SortField.TIME     -> sortedBy { it.timestamp }
+            SortField.APP_NAME -> sortedBy { it.packageName }
+            SortField.STATUS   -> sortedBy { statusSortKey(it.userOverrideStatus) }
         }
+        return if (sortDirection == SortDirection.DESC) sorted.reversed() else sorted
+    }
 
     private fun statusSortKey(overrideStatus: String): Int = when (overrideStatus) {
         "MANUALLY_ALLOWED"  -> 0

@@ -90,12 +90,13 @@ dependencies {
     // Phase 1: MediaPipe / LiteRT dependency disabled (kept as reference).
     // implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
-    // Phase 2: Standard TFLite runtime + Support Library for on-device classification.
-    // tensorflow-lite: Interpreter, model loading, tensor I/O.
-    // tensorflow-lite-support: TensorBuffer and label utilities (used in future phases).
-    // 2.16.1: first release with 16 KB page-aligned .so files (Android 15 compatibility).
-    implementation("org.tensorflow:tensorflow-lite:2.16.1")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    // Phase 2: LiteRT (formerly TFLite) runtime + Support Library for on-device classification.
+    // litert: Interpreter, model loading, tensor I/O. Google rebranded TFLite → LiteRT in 2024;
+    // 1.0.1 is the first stable release with 16 KB page-aligned .so files for Android 15.
+    // litert-support: TensorBuffer and label utilities. Class names remain org.tensorflow.lite.*
+    // for backward compatibility — LocalModelEngine.kt requires no import changes.
+    implementation("com.google.ai.edge.litert:litert:1.0.1")
+    implementation("com.google.ai.edge.litert:litert-support:1.0.1")
 
     // Force the 16 KB page-aligned build of this AndroidX library.
     // The version pulled in transitively by Compose is not aligned; 1.0.1 is.
