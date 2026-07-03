@@ -50,6 +50,8 @@ import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
 import dev.zig.notificationfilter.ui.common.BookDoodle
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
+import dev.zig.notificationfilter.ui.tour.TourKeys
+import dev.zig.notificationfilter.ui.tour.coachMark
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -118,7 +120,8 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 keyboardActions = KeyboardActions(onDone = { onSaveOrAdd() }),
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .coachMark(TourKeys.RULES_INPUT),
             )
             IconButton(onClick = { onSaveOrAdd() }) {
                 Icon(

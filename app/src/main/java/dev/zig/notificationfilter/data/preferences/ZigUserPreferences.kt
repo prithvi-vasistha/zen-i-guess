@@ -22,7 +22,17 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_DAILY_SUMMARY, true)
         set(value) = prefs.edit().putBoolean(KEY_DAILY_SUMMARY, value).apply()
 
+    var termsAccepted: Boolean
+        get() = prefs.getBoolean(KEY_TERMS_ACCEPTED, false)
+        set(value) = prefs.edit().putBoolean(KEY_TERMS_ACCEPTED, value).apply()
+
+    var onboardingCompleted: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
+        set(value) = prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETED, value).apply()
+
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
+        const val KEY_TERMS_ACCEPTED = "terms_accepted"
+        const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
     }
 }

@@ -77,6 +77,8 @@ import dev.zig.notificationfilter.ui.common.BellDoodle
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
+import dev.zig.notificationfilter.ui.tour.TourKeys
+import dev.zig.notificationfilter.ui.tour.coachMark
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -222,7 +224,10 @@ private fun NotificationReviewScreen(
                     )
                 },
                 actions = {
-                    TextButton(onClick = onToggleArchive) {
+                    TextButton(
+                        onClick = onToggleArchive,
+                        modifier = Modifier.coachMark(TourKeys.REVIEW_ARCHIVE),
+                    ) {
                         Text(if (showArchive) "Active" else "Archive")
                     }
                     Box {

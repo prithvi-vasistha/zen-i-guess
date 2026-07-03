@@ -49,6 +49,8 @@ import dev.zig.notificationfilter.ui.common.ClipboardDoodle
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
+import dev.zig.notificationfilter.ui.tour.TourKeys
+import dev.zig.notificationfilter.ui.tour.coachMark
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -92,7 +94,7 @@ fun LogsScreen(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Column {
+                Column(modifier = Modifier.coachMark(TourKeys.LOGS_HEADER)) {
                     Text(
                         text = "Notification Log",
                         style = MaterialTheme.typography.titleLarge,

@@ -54,6 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.ui.common.ScrollFab
+import dev.zig.notificationfilter.ui.tour.TourKeys
+import dev.zig.notificationfilter.ui.tour.coachMark
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +148,8 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
                     )
                 }
             } else {
+                // Spotlight the first row's switch during the onboarding tour.
+                val firstPackage = displayedApps.firstOrNull()?.packageName
                 Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(state = listState) {
                         items(displayedApps, key = { it.packageName }) { app ->
@@ -157,6 +161,11 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
                                         Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
                                             .putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName),
                                     )
+                                },
+                                switchModifier = if (app.packageName == firstPackage) {
+                                    Modifier.coachMark(TourKeys.APPS_MANAGE_SWITCH)
+                                } else {
+                                    Modifier
                                 },
                             )
                             HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
@@ -224,6 +233,7 @@ private fun AppRow(
     app: ManagedAppsViewModel.InstalledApp,
     onToggle: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
+    switchModifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -266,7 +276,7 @@ private fun AppRow(
         Switch(
             checked = app.isManaged,
             onCheckedChange = onToggle,
-            modifier = Modifier.padding(end = 16.dp),
+            modifier = switchModifier.padding(end = 16.dp),
         )
     }
 }
