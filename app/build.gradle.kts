@@ -98,6 +98,13 @@ dependencies {
     implementation("com.google.ai.edge.litert:litert:1.0.1")
     implementation("com.google.ai.edge.litert:litert-support:1.0.1")
 
+    // Phase 4: MediaPipe Text tasks — on-device text embedding for Retrieval-Augmented
+    // Classification (Personal Memory). Runs the Universal Sentence Encoder model in
+    // app/src/main/assets/text_embedder.tflite, whose in-graph SentencePiece custom op
+    // (TFSentencepieceTokenizeOp) the bare LiteRT runtime cannot resolve — tasks-text
+    // bundles that op. 100% on-device, no network. Provides TextEmbedder + cosineSimilarity.
+    implementation("com.google.mediapipe:tasks-text:0.10.21")
+
     // Force the 16 KB page-aligned build of this AndroidX library.
     // The version pulled in transitively by Compose is not aligned; 1.0.1 is.
     implementation("androidx.graphics:graphics-path:1.0.1")
