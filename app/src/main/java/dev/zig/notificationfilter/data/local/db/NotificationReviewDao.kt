@@ -42,6 +42,9 @@ interface NotificationReviewDao {
     @Query("UPDATE notification_review SET userOverrideStatus = :status WHERE id = :id")
     suspend fun updateOverrideStatus(id: Long, status: String)
 
+    @Query("UPDATE notification_review SET userAssignedCategory = :category WHERE id = :id")
+    suspend fun updateUserAssignedCategory(id: Long, category: String?)
+
     // Classifier-blocked notifications older than the 24-hour active window — shown on the Archive screen.
     @Query("""
         SELECT * FROM notification_review

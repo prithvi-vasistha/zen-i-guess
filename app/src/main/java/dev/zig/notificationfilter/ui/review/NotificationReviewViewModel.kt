@@ -1,8 +1,12 @@
 package dev.zig.notificationfilter.ui.review
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
+import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
@@ -17,8 +21,11 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 data class NotificationReviewUiItem(
@@ -38,15 +45,17 @@ data class NotificationReviewUiItem(
 sealed interface ReviewUiState {
     data object Loading : ReviewUiState
     data object Empty : ReviewUiState
-    // Groups keyed by packageName, ordered by most-recent notification per group.
+    // Groups keyed by packageName, ordered by the most-recent notification per group.
     // groupBy() preserves insertion order — DAO returns timestamp DESC so the app
-    // with the newest notification always appears first.
+    // with the newest notification appears first.
     data class Content(val groups: Map<String, List<NotificationReviewUiItem>>) : ReviewUiState
 }
 
 @HiltViewModel
 class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
+    private val overrideDao: AppCategoryOverrideDao,
+    @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private companion object {
@@ -108,6 +117,53 @@ class NotificationReviewViewModel @Inject constructor(
             initialValue = ReviewUiState.Loading,
         )
 
+    // ── Package labels ────────────────────────────────────────────────────────
+    // Labels are resolved once per package on Dispatchers.IO and cached.
+    // ConcurrentHashMap ensures safe concurrent reads and writes from IO threads.
+
+    private val labelCache = ConcurrentHashMap<String, String>()
+    private val _packageLabels = MutableStateFlow<Map<String, String>>(emptyMap())
+    val packageLabels: StateFlow<Map<String, String>> = _packageLabels.asStateFlow()
+
+    // ── Category overrides ────────────────────────────────────────────────────
+
+    val categoryOverrides: StateFlow<Map<String, String>> = overrideDao.getAllFlow()
+        .map { list -> list.associate { it.packageName to it.defaultCategory } }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyMap(),
+        )
+
+    // ── Init: resolve labels for any packages that appear in either list ──────
+
+    init {
+        viewModelScope.launch {
+            merge(uiState, archiveUiState).collect { state ->
+                if (state is ReviewUiState.Content) {
+                    resolveLabelsIfNeeded(state.groups.keys)
+                }
+            }
+        }
+    }
+
+    private suspend fun resolveLabelsIfNeeded(packageNames: Set<String>) {
+        val toResolve = packageNames.filter { !labelCache.containsKey(it) }
+        if (toResolve.isEmpty()) return
+        withContext(Dispatchers.IO) {
+            toResolve.forEach { pkg ->
+                val label = try {
+                    val info = context.packageManager.getApplicationInfo(pkg, 0)
+                    context.packageManager.getApplicationLabel(info).toString()
+                } catch (_: Exception) {
+                    pkg.substringAfterLast('.')
+                }
+                labelCache[pkg] = label
+            }
+        }
+        _packageLabels.value = HashMap(labelCache)
+    }
+
     // ── User actions ──────────────────────────────────────────────────────────
 
     fun onAllowClicked(id: Long) {
@@ -131,6 +187,24 @@ class NotificationReviewViewModel @Inject constructor(
         }
     }
 
+    // Null category clears the app-level override; non-null upserts it.
+    fun setCategoryOverride(packageName: String, category: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (category == null) {
+                overrideDao.delete(packageName)
+            } else {
+                overrideDao.upsert(AppCategoryOverrideEntity(packageName = packageName, defaultCategory = category))
+            }
+        }
+    }
+
+    // Null category resets the per-notification user assignment back to the inferred value.
+    fun setUserAssignedCategory(id: Long, category: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.updateUserAssignedCategory(id, category)
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun List<NotificationReviewEntity>.applySort(sortBy: SortBy): List<NotificationReviewEntity> =
@@ -141,7 +215,6 @@ class NotificationReviewViewModel @Inject constructor(
             SortBy.STATUS    -> sortedBy { statusSortKey(it.userOverrideStatus) }
         }
 
-    // MANUALLY_ALLOWED (user unblocked) → 0, NONE (model decision) → 1, MANUALLY_BLOCKED → 2
     private fun statusSortKey(overrideStatus: String): Int = when (overrideStatus) {
         "MANUALLY_ALLOWED"  -> 0
         "NONE"              -> 1
