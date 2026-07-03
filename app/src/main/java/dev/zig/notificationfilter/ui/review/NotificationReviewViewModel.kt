@@ -10,6 +10,7 @@ import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
+import dev.zig.notificationfilter.domain.memory.PersonalMemory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -65,6 +66,7 @@ sealed interface ReviewUiState {
 class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
     private val overrideDao: AppCategoryOverrideDao,
+    private val personalMemory: PersonalMemory,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -226,6 +228,8 @@ class NotificationReviewViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateReviewState(id, ReviewState.ALLOWED.name)
             dao.updateOverrideStatus(id, "MANUALLY_ALLOWED")
+            // Status written first: rememberOverride reads it back to label the embedding.
+            personalMemory.rememberOverride(id)
         }
     }
 
@@ -233,6 +237,7 @@ class NotificationReviewViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateReviewState(id, ReviewState.BLOCKED.name)
             dao.updateOverrideStatus(id, "MANUALLY_BLOCKED")
+            personalMemory.rememberOverride(id)
         }
     }
 
@@ -240,6 +245,8 @@ class NotificationReviewViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateReviewState(id, ReviewState.PENDING.name)
             dao.updateOverrideStatus(id, "NONE")
+            // Row no longer represents a user decision — drop it from Personal Memory.
+            personalMemory.forgetOverride(id)
         }
     }
 

@@ -14,8 +14,10 @@ import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.domain.NotificationPublisher
+import dev.zig.notificationfilter.domain.classifier.DecisionSource
+import dev.zig.notificationfilter.domain.classifier.EnsembleClassifier
+import dev.zig.notificationfilter.domain.classifier.EnsembleResult
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
-import dev.zig.notificationfilter.domain.classifier.ZigClassifierEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -38,7 +40,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
     @Inject lateinit var dao: NotificationLogDao
     @Inject lateinit var reviewDao: NotificationReviewDao
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
-    @Inject lateinit var classifierEngine: ZigClassifierEngine
+    @Inject lateinit var ensembleClassifier: EnsembleClassifier
     @Inject lateinit var notificationPublisher: NotificationPublisher
 
     override fun onListenerConnected() {
@@ -154,44 +156,64 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // val allowed = llmEngine.evaluate(metadataBlock)
         // ──────────────────────────────────────────────────────────────────────
 
-        // Classifier lane: on-device TFLite model evaluates notifications that
-        // passed all deterministic gates. Fails open (allows) if the model is not
-        // yet installed, logging MODEL_ERROR so the issue is visible in the Logs tab.
+        // Classifier lane: the RAC ensemble evaluates notifications that passed all
+        // deterministic gates — the base TFLite model (Base Instinct) plus a KNN search
+        // over the user's Personal Memory of past overrides. Fails open (allows) if the
+        // model is not yet installed, logging MODEL_ERROR so it is visible in the Logs tab.
         val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
         val category = NotificationCategory.resolve(packageName, text)
 
         log(jobId, packageName, title, content, "MODEL_INVOKED",
-            "Sending to on-device classifier [$category]")
+            "Sending to on-device ensemble [$category]")
 
         val result = try {
-            classifierEngine.evaluate(category, packageName, text)
+            ensembleClassifier.evaluate(category, packageName, text)
         } catch (e: Exception) {
             log(jobId, packageName, title, content, "MODEL_ERROR",
                 "Inference failed: ${e.message} — failing open")
             // Fail open: allow the notification and record zero confidence so the
             // active learning loop can identify model errors in the training export.
-            dev.zig.notificationfilter.domain.classifier.ClassifierResult(
+            EnsembleResult(
                 allowed = true,
-                confidence = 0f,
+                source = DecisionSource.BASE_MODEL,
+                baseConfidence = 0f,
                 category = category,
+                topSimilarity = 0f,
+                consensusShare = 0f,
+                neighborCount = 0,
             )
         }
 
         val inferredCategory = "CATEGORY_${result.category.name}"
 
+        // Provenance: surface when Personal Memory overrode the base model so the Logs
+        // tab makes the decision source explicit for debugging.
+        if (result.source == DecisionSource.PERSONAL_MEMORY) {
+            val verdict = if (result.allowed) "ALLOW" else "BLOCK"
+            log(jobId, packageName, title, content, "MEMORY_OVERRIDE_$verdict",
+                "Personal Memory vetoed base model → $verdict " +
+                    "(topSim=${result.topSimilarity}, consensus=${result.consensusShare}, " +
+                    "neighbors=${result.neighborCount})")
+        }
+
+        val decidedBy = when (result.source) {
+            DecisionSource.PERSONAL_MEMORY -> "Personal Memory"
+            DecisionSource.BASE_MODEL -> "base classifier"
+        }
+
         if (result.allowed) {
             log(jobId, packageName, title, content, "MODEL_ALLOWED",
-                "Classifier score ${result.confidence} above threshold — forwarding")
+                "Allowed by $decidedBy (base score ${result.baseConfidence}) — forwarding")
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via on-device classifier")
+                "Forwarded to user via $decidedBy")
             review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED",
-                result.confidence, inferredCategory)
+                result.baseConfidence, inferredCategory)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
-                "Classifier score ${result.confidence} below threshold — suppressed")
+                "Blocked by $decidedBy (base score ${result.baseConfidence}) — suppressed")
             review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
-                result.confidence, inferredCategory)
+                result.baseConfidence, inferredCategory)
         }
     }
 
