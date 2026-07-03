@@ -12,9 +12,12 @@ import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
@@ -25,6 +28,10 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
@@ -49,6 +56,9 @@ sealed interface ReviewUiState {
     // groupBy() preserves insertion order — DAO returns timestamp DESC so the app
     // with the newest notification appears first.
     data class Content(val groups: Map<String, List<NotificationReviewUiItem>>) : ReviewUiState
+    // Archive only: notifications grouped first by date (newest day first),
+    // then by packageName within each day.
+    data class DateGroupedContent(val dateGroups: List<DateGroup>) : ReviewUiState
 }
 
 @HiltViewModel
@@ -60,7 +70,9 @@ class NotificationReviewViewModel @Inject constructor(
 
     private companion object {
         private const val TWENTY_FOUR_HOURS_MS = 24L * 60L * 60L * 1_000L
+        private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1_000L
         private const val CUTOFF_REFRESH_INTERVAL_MS = 60L * 60L * 1_000L
+        private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d")
     }
 
     // ── Filter state ──────────────────────────────────────────────────────────
@@ -80,14 +92,47 @@ class NotificationReviewViewModel @Inject constructor(
         _filter.value = _filter.value.copy(sortDirection = sortDirection)
     }
 
-    // ── Cutoff ticker (shared between active and archive) ─────────────────────
+    private val _archiveDateFilter = MutableStateFlow<LocalDate?>(null)
+    val archiveDateFilter: StateFlow<LocalDate?> = _archiveDateFilter.asStateFlow()
 
-    private val cutoffFlow = flow {
-        while (true) {
-            emit(System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS)
-            delay(CUTOFF_REFRESH_INTERVAL_MS)
+    fun setArchiveDateFilter(date: LocalDate?) {
+        _archiveDateFilter.value = date
+    }
+
+    // ── Refresh ───────────────────────────────────────────────────────────────
+    // _refreshSignal is merged into both cutoff flows so pull-to-refresh forces
+    // an immediate re-emission with the current timestamp instead of waiting for
+    // the hourly tick.
+
+    private val _refreshSignal = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private val _refreshCompleted = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val refreshCompleted: SharedFlow<Unit> = _refreshCompleted.asSharedFlow()
+
+    fun refresh() {
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            _refreshSignal.tryEmit(Unit)
+            delay(700)
+            _isRefreshing.value = false
+            _refreshCompleted.tryEmit(Unit)
         }
     }
+
+    // ── Cutoff ticker ─────────────────────────────────────────────────────────
+
+    private val cutoffFlow = merge(
+        flow { while (true) { emit(Unit); delay(CUTOFF_REFRESH_INTERVAL_MS) } },
+        _refreshSignal,
+    ).map { System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS }
+
+    private val archiveCutoffFlow = merge(
+        flow { while (true) { emit(Unit); delay(CUTOFF_REFRESH_INTERVAL_MS) } },
+        _refreshSignal,
+    ).map { System.currentTimeMillis() - THIRTY_DAYS_MS }
 
     // ── Active inbox ──────────────────────────────────────────────────────────
 
@@ -106,13 +151,15 @@ class NotificationReviewViewModel @Inject constructor(
         )
 
     // ── Archive ───────────────────────────────────────────────────────────────
+    // 30-day window (>= archiveCutoffTimestamp) — overlaps with the active inbox
+    // so today's notifications appear in both tabs. Grouped by date then by app.
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val archiveUiState: StateFlow<ReviewUiState> = combine(cutoffFlow, _filter) { cutoff, filter ->
+    val archiveUiState: StateFlow<ReviewUiState> = combine(archiveCutoffFlow, _filter) { cutoff, filter ->
         Pair(cutoff, filter)
     }.flatMapLatest { (cutoff, filter) ->
         dao.searchArchiveFlow(cutoff, filter.query)
-            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toReviewUiState() }
+            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toDateGroupedUiState() }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -144,8 +191,13 @@ class NotificationReviewViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             merge(uiState, archiveUiState).collect { state ->
-                if (state is ReviewUiState.Content) {
-                    resolveLabelsIfNeeded(state.groups.keys)
+                when (state) {
+                    is ReviewUiState.Content -> resolveLabelsIfNeeded(state.groups.keys)
+                    is ReviewUiState.DateGroupedContent -> {
+                        val packages = state.dateGroups.flatMap { it.appGroups.keys }.toSet()
+                        resolveLabelsIfNeeded(packages)
+                    }
+                    else -> {}
                 }
             }
         }
@@ -230,23 +282,43 @@ class NotificationReviewViewModel @Inject constructor(
         else                -> 1
     }
 
+    private fun NotificationReviewEntity.toUiItem() = NotificationReviewUiItem(
+        id = id,
+        packageName = packageName,
+        title = title,
+        content = content,
+        timestamp = timestamp,
+        systemDecision = systemDecision,
+        reviewState = reviewState,
+        modelConfidence = modelConfidence,
+        inferredCategory = inferredCategory,
+        userAssignedCategory = userAssignedCategory,
+        userOverrideStatus = userOverrideStatus,
+    )
+
     private fun List<NotificationReviewEntity>.toReviewUiState(): ReviewUiState {
         if (isEmpty()) return ReviewUiState.Empty
-        val items = map { entity ->
-            NotificationReviewUiItem(
-                id = entity.id,
-                packageName = entity.packageName,
-                title = entity.title,
-                content = entity.content,
-                timestamp = entity.timestamp,
-                systemDecision = entity.systemDecision,
-                reviewState = entity.reviewState,
-                modelConfidence = entity.modelConfidence,
-                inferredCategory = entity.inferredCategory,
-                userAssignedCategory = entity.userAssignedCategory,
-                userOverrideStatus = entity.userOverrideStatus,
-            )
-        }
-        return ReviewUiState.Content(items.groupBy { it.packageName })
+        return ReviewUiState.Content(map { it.toUiItem() }.groupBy { it.packageName })
+    }
+
+    private fun List<NotificationReviewEntity>.toDateGroupedUiState(): ReviewUiState {
+        if (isEmpty()) return ReviewUiState.Empty
+        val zoneId = ZoneId.systemDefault()
+        val today = LocalDate.now(zoneId)
+        val yesterday = today.minusDays(1)
+        val dateGroups = groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zoneId).toLocalDate() }
+            .map { (date, entities) ->
+                val label = when (date) {
+                    today     -> "Today"
+                    yesterday -> "Yesterday"
+                    else      -> date.format(DATE_FORMATTER)
+                }
+                DateGroup(
+                    label = label,
+                    date = date,
+                    appGroups = entities.map { it.toUiItem() }.groupBy { it.packageName },
+                )
+            }
+        return ReviewUiState.DateGroupedContent(dateGroups)
     }
 }

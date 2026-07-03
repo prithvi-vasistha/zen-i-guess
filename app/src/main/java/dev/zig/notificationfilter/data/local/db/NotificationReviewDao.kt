@@ -56,7 +56,7 @@ interface NotificationReviewDao {
 
     // Search across packageName, title, and content with a LIKE '%query%' match.
     // Applied to the active window (timestamp >= cutoffTimestamp) for the inbox, and
-    // to the archive window (timestamp < cutoffTimestamp) for the archive screen.
+    // to the archive window (timestamp >= archiveCutoffTimestamp) for the archive screen.
     // Sorting is applied in Kotlin on the emitted list — see ReviewFilter / SortBy.
     // Phase D: IN clause expanded to include PUBLISHED so the review screen shows
     // both model-blocked and model-allowed notifications with context-aware actions.
@@ -71,16 +71,18 @@ interface NotificationReviewDao {
     """)
     fun searchActiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
+    // Archive = last 30 days (>= archiveCutoffTimestamp), overlapping with the active inbox.
+    // Today's notifications appear in both tabs.
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
-        AND timestamp < :cutoffTimestamp
+        AND timestamp >= :archiveCutoffTimestamp
         AND (packageName LIKE '%' || :query || '%'
           OR title      LIKE '%' || :query || '%'
           OR content    LIKE '%' || :query || '%')
         ORDER BY timestamp DESC
     """)
-    fun searchArchiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
+    fun searchArchiveFlow(archiveCutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
     // Called by the retraining WorkManager to fetch only rows that need to be
     // written to the master training CSV — avoids scanning the full table nightly.

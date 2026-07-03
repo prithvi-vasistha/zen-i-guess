@@ -1,6 +1,7 @@
 package dev.zig.notificationfilter.ui.rules
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -46,6 +48,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
 import dev.zig.notificationfilter.ui.common.BookDoodle
+import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -53,6 +56,7 @@ import dev.zig.notificationfilter.ui.common.ZigEmptyState
 fun CustomRulesScreen(modifier: Modifier = Modifier) {
     val viewModel: CustomRulesViewModel = hiltViewModel()
     val rules by viewModel.rules.collectAsState()
+    val listState = rememberLazyListState()
     var inputText by rememberSaveable { mutableStateOf("") }
     // Int? survives config changes via rememberSaveable without needing Parcelable.
     var editingRuleId by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -140,27 +144,35 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 doodle = { BookDoodle() },
             )
         } else {
-            LazyColumn {
-                items(rules, key = { it.id }) { rule ->
-                    RuleRow(
-                        rule = rule,
-                        isBeingEdited = rule.id == editingRuleId,
-                        onEdit = {
-                            editingRuleId = rule.id
-                            inputText = rule.conditions.joinToString(", ")
-                        },
-                        onDelete = {
-                            // Exit edit mode before deleting so the text field doesn't retain
-                            // stale content from the rule that's about to be removed.
-                            if (editingRuleId == rule.id) {
-                                editingRuleId = null
-                                inputText = ""
-                            }
-                            viewModel.deleteRule(rule)
-                        },
-                    )
-                    HorizontalDivider()
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(state = listState) {
+                    items(rules, key = { it.id }) { rule ->
+                        RuleRow(
+                            rule = rule,
+                            isBeingEdited = rule.id == editingRuleId,
+                            onEdit = {
+                                editingRuleId = rule.id
+                                inputText = rule.conditions.joinToString(", ")
+                            },
+                            onDelete = {
+                                // Exit edit mode before deleting so the text field doesn't retain
+                                // stale content from the rule that's about to be removed.
+                                if (editingRuleId == rule.id) {
+                                    editingRuleId = null
+                                    inputText = ""
+                                }
+                                viewModel.deleteRule(rule)
+                            },
+                        )
+                        HorizontalDivider()
+                    }
                 }
+                ScrollFab(
+                    listState = listState,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp),
+                )
             }
         }
     }

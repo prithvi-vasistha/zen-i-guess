@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.ui.review
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -21,11 +22,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,6 +40,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,10 +48,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,9 +72,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
 import dev.zig.notificationfilter.ui.common.BellDoodle
+import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -122,6 +136,16 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
     val filter by viewModel.filter.collectAsState()
     val packageLabels by viewModel.packageLabels.collectAsState()
     val categoryOverrides by viewModel.categoryOverrides.collectAsState()
+    val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshCompleted.collect {
+            snackbarHostState.showSnackbar("Up to date")
+        }
+    }
 
     var showArchive by remember { mutableStateOf(false) }
 
@@ -132,10 +156,15 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
         packageLabels = packageLabels,
         categoryOverrides = categoryOverrides,
         showArchive = showArchive,
+        archiveDateFilter = archiveDateFilter,
+        isRefreshing = isRefreshing,
+        snackbarHostState = snackbarHostState,
         onToggleArchive = { showArchive = !showArchive },
+        onRefresh = viewModel::refresh,
         onQueryChange = viewModel::setQuery,
         onSortFieldChange = viewModel::setSortField,
         onSortDirectionChange = viewModel::setSortDirection,
+        onArchiveDateFilterChange = viewModel::setArchiveDateFilter,
         onAllowClicked = viewModel::onAllowClicked,
         onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
         onUndoClicked = viewModel::onUndoClicked,
@@ -156,10 +185,15 @@ private fun NotificationReviewScreen(
     packageLabels: Map<String, String>,
     categoryOverrides: Map<String, String>,
     showArchive: Boolean,
+    archiveDateFilter: LocalDate?,
+    isRefreshing: Boolean,
+    snackbarHostState: SnackbarHostState,
     onToggleArchive: () -> Unit,
+    onRefresh: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSortFieldChange: (SortField) -> Unit,
     onSortDirectionChange: (SortDirection) -> Unit,
+    onArchiveDateFilterChange: (LocalDate?) -> Unit,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
@@ -169,6 +203,7 @@ private fun NotificationReviewScreen(
 ) {
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
@@ -186,8 +221,32 @@ private fun NotificationReviewScreen(
         },
     ) { innerPadding ->
         val activeState = if (showArchive) archiveUiState else uiState
+        val pullToRefreshState = rememberPullToRefreshState()
+        val inboxListState = rememberLazyListState()
+        val archiveListState = rememberLazyListState()
+        val activeListState = if (showArchive) archiveListState else inboxListState
 
-        Column(modifier = Modifier.padding(innerPadding)) {
+        LaunchedEffect(filter.sortField, filter.sortDirection) {
+            activeListState.scrollToItem(0)
+        }
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            state = pullToRefreshState,
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize(),
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    color = ZigGreen,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+            },
+        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
             OutlinedTextField(
                 value = filter.query,
                 onValueChange = onQueryChange,
@@ -234,28 +293,74 @@ private fun NotificationReviewScreen(
                 )
             }
 
-            when (activeState) {
-                is ReviewUiState.Loading -> { /* intentionally blank — avoids flicker */ }
-                is ReviewUiState.Empty -> {
-                    ZigEmptyState(
-                        title = if (showArchive) "Archive is empty" else "You're all caught up",
-                        doodle = { BellDoodle() },
-                    )
-                }
-                is ReviewUiState.Content -> {
-                    ReviewListContent(
-                        groupedItems = activeState.groups,
-                        packageLabels = packageLabels,
-                        categoryOverrides = categoryOverrides,
-                        onAllowClicked = onAllowClicked,
-                        onBlockAndMuteClicked = onBlockAndMuteClicked,
-                        onUndoClicked = onUndoClicked,
-                        onSetCategoryOverride = onSetCategoryOverride,
-                        onSetUserCategory = onSetUserCategory,
+            if (showArchive) {
+                val availableDates = (activeState as? ReviewUiState.DateGroupedContent)
+                    ?.dateGroups?.map { it.date to it.label }
+                    ?: emptyList()
+                if (availableDates.isNotEmpty()) {
+                    DateFilterChip(
+                        currentDate = archiveDateFilter,
+                        availableDates = availableDates,
+                        onSelect = onArchiveDateFilterChange,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
             }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                when (activeState) {
+                    is ReviewUiState.Loading -> { /* intentionally blank — avoids flicker */ }
+                    is ReviewUiState.Empty -> {
+                        ZigEmptyState(
+                            title = if (showArchive) "Archive is empty" else "You're all caught up",
+                            doodle = { BellDoodle() },
+                        )
+                    }
+                    is ReviewUiState.Content -> {
+                        ReviewListContent(
+                            listState = inboxListState,
+                            groupedItems = activeState.groups,
+                            packageLabels = packageLabels,
+                            categoryOverrides = categoryOverrides,
+                            onAllowClicked = onAllowClicked,
+                            onBlockAndMuteClicked = onBlockAndMuteClicked,
+                            onUndoClicked = onUndoClicked,
+                            onSetCategoryOverride = onSetCategoryOverride,
+                            onSetUserCategory = onSetUserCategory,
+                        )
+                    }
+                    is ReviewUiState.DateGroupedContent -> {
+                        val displayedGroups = if (archiveDateFilter != null) {
+                            activeState.dateGroups.filter { it.date == archiveDateFilter }
+                        } else {
+                            activeState.dateGroups
+                        }
+                        if (displayedGroups.isEmpty()) {
+                            ZigEmptyState(title = "No notifications for this date", doodle = { BellDoodle() })
+                        } else {
+                            ArchiveDateGroupedContent(
+                                listState = archiveListState,
+                                dateGroups = displayedGroups,
+                                packageLabels = packageLabels,
+                                categoryOverrides = categoryOverrides,
+                                onAllowClicked = onAllowClicked,
+                                onBlockAndMuteClicked = onBlockAndMuteClicked,
+                                onUndoClicked = onUndoClicked,
+                                onSetCategoryOverride = onSetCategoryOverride,
+                                onSetUserCategory = onSetUserCategory,
+                            )
+                        }
+                    }
+                }
+                ScrollFab(
+                    listState = activeListState,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp),
+                )
+            }
         }
+        } // PullToRefreshBox
     }
 }
 
@@ -352,6 +457,7 @@ private fun SortDirectionMenu(
 
 @Composable
 private fun ReviewListContent(
+    listState: LazyListState,
     groupedItems: Map<String, List<NotificationReviewUiItem>>,
     packageLabels: Map<String, String>,
     categoryOverrides: Map<String, String>,
@@ -363,6 +469,7 @@ private fun ReviewListContent(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
@@ -398,6 +505,8 @@ private fun AppGroupCard(
     onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
 ) {
+    var expanded by remember { mutableStateOf(true) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -405,25 +514,29 @@ private fun AppGroupCard(
         colors = CardDefaults.cardColors(containerColor = ZigGreen.copy(alpha = 0.10f)),
         shape = MaterialTheme.shapes.large,
     ) {
-        Column {
+        Column(modifier = Modifier.animateContentSize()) {
             AppGroupHeader(
                 appLabel = appLabel,
                 currentOverride = currentOverride,
                 onSetOverride = onSetCategoryOverride,
+                expanded = expanded,
+                onToggle = { expanded = !expanded },
             )
-            HorizontalDivider(color = ZigGreen.copy(alpha = 0.18f), thickness = 0.5.dp)
-            Column(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items.forEach { item ->
-                    ReviewItemCard(
-                        item = item,
-                        onAllowClicked = onAllowClicked,
-                        onBlockAndMuteClicked = onBlockAndMuteClicked,
-                        onUndoClicked = onUndoClicked,
-                        onSetUserCategory = onSetUserCategory,
-                    )
+            if (expanded) {
+                HorizontalDivider(color = ZigGreen.copy(alpha = 0.18f), thickness = 0.5.dp)
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items.forEach { item ->
+                        ReviewItemCard(
+                            item = item,
+                            onAllowClicked = onAllowClicked,
+                            onBlockAndMuteClicked = onBlockAndMuteClicked,
+                            onUndoClicked = onUndoClicked,
+                            onSetUserCategory = onSetUserCategory,
+                        )
+                    }
                 }
             }
         }
@@ -437,6 +550,8 @@ private fun AppGroupHeader(
     appLabel: String,
     currentOverride: String?,
     onSetOverride: (String?) -> Unit,
+    expanded: Boolean,
+    onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -444,6 +559,10 @@ private fun AppGroupHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            ) { onToggle() }
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -500,6 +619,13 @@ private fun AppGroupHeader(
                 }
             }
         }
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+            imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "Collapse" else "Expand",
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -711,6 +837,119 @@ private fun ActionRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
+        }
+    }
+}
+
+// ── Archive: date-grouped list ────────────────────────────────────────────────
+
+@Composable
+private fun ArchiveDateGroupedContent(
+    listState: LazyListState,
+    dateGroups: List<DateGroup>,
+    packageLabels: Map<String, String>,
+    categoryOverrides: Map<String, String>,
+    onAllowClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
+    onUndoClicked: (Long) -> Unit,
+    onSetCategoryOverride: (String, String?) -> Unit,
+    onSetUserCategory: (Long, String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 16.dp),
+    ) {
+        dateGroups.forEach { dateGroup ->
+            item(key = "date_${dateGroup.date}") {
+                DateGroupHeader(label = dateGroup.label)
+            }
+            dateGroup.appGroups.forEach { (packageName, items) ->
+                item(key = "group_${dateGroup.date}_$packageName") {
+                    AppGroupCard(
+                        packageName = packageName,
+                        items = items,
+                        appLabel = packageLabels[packageName] ?: packageName.substringAfterLast('.'),
+                        currentOverride = categoryOverrides[packageName],
+                        onSetCategoryOverride = { category -> onSetCategoryOverride(packageName, category) },
+                        onAllowClicked = onAllowClicked,
+                        onBlockAndMuteClicked = onBlockAndMuteClicked,
+                        onUndoClicked = onUndoClicked,
+                        onSetUserCategory = onSetUserCategory,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateGroupHeader(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        HorizontalDivider(
+            modifier = Modifier.weight(1f),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+        )
+    }
+}
+
+// ── Date filter chip (archive tab only) ───────────────────────────────────────
+
+@Composable
+private fun DateFilterChip(
+    currentDate: LocalDate?,
+    availableDates: List<Pair<LocalDate, String>>,
+    onSelect: (LocalDate?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        FilterChip(
+            selected = currentDate != null,
+            onClick = { expanded = true },
+            label = {
+                Text(
+                    text = if (currentDate != null) {
+                        availableDates.find { it.first == currentDate }?.second ?: "Date"
+                    } else {
+                        "All dates"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            },
+            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("All dates", style = MaterialTheme.typography.bodySmall) },
+                onClick = { onSelect(null); expanded = false },
+            )
+            HorizontalDivider()
+            availableDates.forEach { (date, label) ->
+                DropdownMenuItem(
+                    text = { Text(label, style = MaterialTheme.typography.bodySmall) },
+                    onClick = { onSelect(date); expanded = false },
+                )
+            }
         }
     }
 }

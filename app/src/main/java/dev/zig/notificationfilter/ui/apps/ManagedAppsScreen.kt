@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -52,12 +53,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import dev.zig.notificationfilter.ui.common.ScrollFab
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManagedAppsScreen(modifier: Modifier = Modifier) {
     val viewModel: ManagedAppsViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
+    val listState = rememberLazyListState()
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -143,20 +146,28 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
                     )
                 }
             } else {
-                LazyColumn {
-                    items(displayedApps, key = { it.packageName }) { app ->
-                        AppRow(
-                            app = app,
-                            onToggle = { viewModel.setManaged(app.packageName, it) },
-                            onOpenSettings = {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                        .putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName),
-                                )
-                            },
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(state = listState) {
+                        items(displayedApps, key = { it.packageName }) { app ->
+                            AppRow(
+                                app = app,
+                                onToggle = { viewModel.setManaged(app.packageName, it) },
+                                onOpenSettings = {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                            .putExtra(Settings.EXTRA_APP_PACKAGE, app.packageName),
+                                    )
+                                },
+                            )
+                            HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
+                        }
                     }
+                    ScrollFab(
+                        listState = listState,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp),
+                    )
                 }
             }
         }
