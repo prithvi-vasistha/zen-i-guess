@@ -173,7 +173,7 @@ class NotificationReviewViewModel @Inject constructor(
         }
     }
 
-    fun onBlockClicked(id: Long) {
+    fun onBlockAndMuteClicked(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateReviewState(id, ReviewState.BLOCKED.name)
             dao.updateOverrideStatus(id, "MANUALLY_BLOCKED")

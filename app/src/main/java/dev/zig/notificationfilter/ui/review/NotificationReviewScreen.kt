@@ -56,13 +56,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import dev.zig.notificationfilter.data.local.db.ReviewState
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
 import dev.zig.notificationfilter.ui.common.BellDoodle
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
@@ -71,7 +69,29 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-// ── Timestamp formatting ────────────────────────────────────────────────────
+// ── Effective action: drives button display and background colour ─────────────
+// Derived from systemDecision + userOverrideStatus at render time.
+
+private enum class EffectiveCardAction {
+    ALLOW_ONLY,               // MODEL_BLOCKED + NONE          → show Allow
+    BLOCK_AND_MUTE_ONLY,      // PUBLISHED + NONE              → show Block & Mute
+    BLOCK_AND_MUTE_WITH_UNDO, // MODEL_BLOCKED + MANUALLY_ALLOWED → Block & Mute + Undo
+    ALLOW_WITH_UNDO;          // PUBLISHED + MANUALLY_BLOCKED  → Allow + Undo
+
+    companion object {
+        fun from(systemDecision: String, userOverrideStatus: String): EffectiveCardAction {
+            val isBlocked = systemDecision == "MODEL_BLOCKED" || systemDecision == "LLM_BLOCKED"
+            return when {
+                isBlocked && userOverrideStatus == "MANUALLY_ALLOWED" -> BLOCK_AND_MUTE_WITH_UNDO
+                isBlocked                                              -> ALLOW_ONLY
+                systemDecision == "PUBLISHED" && userOverrideStatus == "MANUALLY_BLOCKED" -> ALLOW_WITH_UNDO
+                else                                                   -> BLOCK_AND_MUTE_ONLY
+            }
+        }
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 private val REVIEW_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MMM dd · HH:mm")
@@ -88,10 +108,9 @@ private fun SortBy.displayLabel(): String = when (this) {
     SortBy.STATUS    -> "Status"
 }
 
-// Strip "CATEGORY_" prefix for compact display in chips.
 private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
 
-// ── Entry point ─────────────────────────────────────────────────────────────
+// ── Entry point ───────────────────────────────────────────────────────────────
 
 @Composable
 fun NotificationReviewRoute(modifier: Modifier = Modifier) {
@@ -115,7 +134,7 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
         onQueryChange = viewModel::setQuery,
         onSortChange = viewModel::setSortBy,
         onAllowClicked = viewModel::onAllowClicked,
-        onBlockClicked = viewModel::onBlockClicked,
+        onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
         onUndoClicked = viewModel::onUndoClicked,
         onSetCategoryOverride = viewModel::setCategoryOverride,
         onSetUserCategory = viewModel::setUserAssignedCategory,
@@ -123,7 +142,7 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
     )
 }
 
-// ── Screen ──────────────────────────────────────────────────────────────────
+// ── Screen ────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,7 +157,7 @@ private fun NotificationReviewScreen(
     onQueryChange: (String) -> Unit,
     onSortChange: (SortBy) -> Unit,
     onAllowClicked: (Long) -> Unit,
-    onBlockClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
@@ -165,8 +184,6 @@ private fun NotificationReviewScreen(
         val activeState = if (showArchive) archiveUiState else uiState
 
         Column(modifier = Modifier.padding(innerPadding)) {
-
-            // Search bar
             OutlinedTextField(
                 value = filter.query,
                 onValueChange = onQueryChange,
@@ -194,7 +211,6 @@ private fun NotificationReviewScreen(
                 textStyle = MaterialTheme.typography.bodySmall,
             )
 
-            // Sort chips
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -217,9 +233,7 @@ private fun NotificationReviewScreen(
             }
 
             when (activeState) {
-                is ReviewUiState.Loading -> {
-                    // Room has not yet emitted — intentionally blank to avoid flicker.
-                }
+                is ReviewUiState.Loading -> { /* intentionally blank — avoids flicker */ }
                 is ReviewUiState.Empty -> {
                     ZigEmptyState(
                         title = if (showArchive) "Archive is empty" else "You're all caught up",
@@ -232,7 +246,7 @@ private fun NotificationReviewScreen(
                         packageLabels = packageLabels,
                         categoryOverrides = categoryOverrides,
                         onAllowClicked = onAllowClicked,
-                        onBlockClicked = onBlockClicked,
+                        onBlockAndMuteClicked = onBlockAndMuteClicked,
                         onUndoClicked = onUndoClicked,
                         onSetCategoryOverride = onSetCategoryOverride,
                         onSetUserCategory = onSetUserCategory,
@@ -243,7 +257,7 @@ private fun NotificationReviewScreen(
     }
 }
 
-// ── List ────────────────────────────────────────────────────────────────────
+// ── List ──────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -252,7 +266,7 @@ private fun ReviewListContent(
     packageLabels: Map<String, String>,
     categoryOverrides: Map<String, String>,
     onAllowClicked: (Long) -> Unit,
-    onBlockClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
@@ -263,7 +277,6 @@ private fun ReviewListContent(
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         groupedItems.forEach { (packageName, items) ->
-            // ── Tier A: App-level sticky header ───────────────────────────────
             stickyHeader(key = "header_$packageName") {
                 AppGroupHeader(
                     appLabel = packageLabels[packageName]
@@ -272,12 +285,11 @@ private fun ReviewListContent(
                     onSetOverride = { category -> onSetCategoryOverride(packageName, category) },
                 )
             }
-            // ── Tier B: Per-notification cards ────────────────────────────────
             items(items = items, key = { it.id }) { item ->
                 ReviewItemCard(
                     item = item,
                     onAllowClicked = onAllowClicked,
-                    onBlockClicked = onBlockClicked,
+                    onBlockAndMuteClicked = onBlockAndMuteClicked,
                     onUndoClicked = onUndoClicked,
                     onSetUserCategory = onSetUserCategory,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
@@ -287,12 +299,12 @@ private fun ReviewListContent(
     }
 }
 
-// ── Tier A: App-level sticky header ─────────────────────────────────────────
+// ── Tier A: App-level sticky header ──────────────────────────────────────────
 
 @Composable
 private fun AppGroupHeader(
     appLabel: String,
-    currentOverride: String?,   // e.g. "FINANCE" — null if no override is set
+    currentOverride: String?,
     onSetOverride: (String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -325,13 +337,7 @@ private fun AppGroupHeader(
                     )
                 },
                 icon = if (currentOverride != null) {
-                    {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null,
             )
             DropdownMenu(
@@ -367,22 +373,24 @@ private fun AppGroupHeader(
     }
 }
 
-// ── Tier B: Notification card ────────────────────────────────────────────────
+// ── Tier B: Notification card ─────────────────────────────────────────────────
 
 @Composable
 private fun ReviewItemCard(
     item: NotificationReviewUiItem,
     onAllowClicked: (Long) -> Unit,
-    onBlockClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val effectiveAction = EffectiveCardAction.from(item.systemDecision, item.userOverrideStatus)
+
     val containerColor by animateColorAsState(
-        targetValue = when (item.reviewState) {
-            ReviewState.ALLOWED -> ZigGreen.copy(alpha = 0.12f)
-            ReviewState.BLOCKED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.20f)
-            ReviewState.PENDING -> MaterialTheme.colorScheme.surface
+        targetValue = when (effectiveAction) {
+            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.12f)
+            EffectiveCardAction.ALLOW_WITH_UNDO          -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.20f)
+            else                                         -> MaterialTheme.colorScheme.surface
         },
         animationSpec = tween(durationMillis = 300),
         label = "card_bg",
@@ -392,189 +400,194 @@ private fun ReviewItemCard(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor),
     ) {
-        AnimatedContent(
-            targetState = item.reviewState,
-            transitionSpec = {
-                fadeIn(animationSpec = tween(durationMillis = 220)) togetherWith
-                    fadeOut(animationSpec = tween(durationMillis = 160))
-            },
-            label = "card_state",
-        ) { reviewState ->
-            when (reviewState) {
-                ReviewState.PENDING -> PendingCardContent(
-                    item = item,
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            // Header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.title.ifBlank { item.packageName.substringAfterLast('.') },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = formatReviewTimestamp(item.timestamp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (item.content.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = item.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Category chip + confidence
+            CategoryRow(item = item, onSetUserCategory = onSetUserCategory)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Action buttons — animated on effective action transitions
+            AnimatedContent(
+                targetState = effectiveAction,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                },
+                label = "action_row",
+            ) { action ->
+                ActionRow(
+                    action = action,
+                    id = item.id,
+                    isPublishedRow = item.systemDecision == "PUBLISHED",
                     onAllowClicked = onAllowClicked,
-                    onBlockClicked = onBlockClicked,
-                    onSetUserCategory = onSetUserCategory,
-                )
-                ReviewState.ALLOWED -> ReviewedCardContent(
-                    message = "Allowed future notifications like this",
-                    messageColor = MaterialTheme.colorScheme.primary,
-                    onUndoClicked = { onUndoClicked(item.id) },
-                )
-                ReviewState.BLOCKED -> ReviewedCardContent(
-                    message = "Confirmed Blocked",
-                    messageColor = MaterialTheme.colorScheme.error,
-                    onUndoClicked = { onUndoClicked(item.id) },
+                    onBlockAndMuteClicked = onBlockAndMuteClicked,
+                    onUndoClicked = onUndoClicked,
                 )
             }
         }
     }
 }
 
+// ── Category chip ─────────────────────────────────────────────────────────────
+
 @Composable
-private fun PendingCardContent(
+private fun CategoryRow(
     item: NotificationReviewUiItem,
-    onAllowClicked: (Long) -> Unit,
-    onBlockClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
 ) {
     var categoryMenuExpanded by remember { mutableStateOf(false) }
-
-    // User assignment takes precedence over the model-inferred category.
     val displayCategory = (item.userAssignedCategory ?: item.inferredCategory).toDisplayCategory()
     val isUserAssigned = item.userAssignedCategory != null
 
-    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = item.title.ifBlank { item.packageName.substringAfterLast('.') },
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            SuggestionChip(
+                onClick = { categoryMenuExpanded = true },
+                label = { Text(displayCategory, style = MaterialTheme.typography.labelSmall) },
+                icon = if (isUserAssigned) {
+                    { Icon(Icons.Default.Check, contentDescription = "User assigned", modifier = Modifier.size(14.dp)) }
+                } else null,
             )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = formatReviewTimestamp(item.timestamp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        if (item.content.isNotBlank()) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = item.content,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── Category row: chip + optional confidence score ────────────────────
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                SuggestionChip(
-                    onClick = { categoryMenuExpanded = true },
-                    label = {
-                        Text(
-                            text = displayCategory,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                    },
-                    icon = if (isUserAssigned) {
-                        {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "User assigned",
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
-                    } else null,
-                )
-                DropdownMenu(
-                    expanded = categoryMenuExpanded,
-                    onDismissRequest = { categoryMenuExpanded = false },
-                ) {
-                    NotificationCategory.entries.forEach { cat ->
-                        DropdownMenuItem(
-                            text = { Text(cat.name) },
-                            onClick = {
-                                onSetUserCategory(item.id, "CATEGORY_${cat.name}")
-                                categoryMenuExpanded = false
-                            },
-                        )
-                    }
-                    if (isUserAssigned) {
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Reset to inferred") },
-                            onClick = {
-                                onSetUserCategory(item.id, null)
-                                categoryMenuExpanded = false
-                            },
-                        )
-                    }
+            DropdownMenu(
+                expanded = categoryMenuExpanded,
+                onDismissRequest = { categoryMenuExpanded = false },
+            ) {
+                NotificationCategory.entries.forEach { cat ->
+                    DropdownMenuItem(
+                        text = { Text(cat.name) },
+                        onClick = {
+                            onSetUserCategory(item.id, "CATEGORY_${cat.name}")
+                            categoryMenuExpanded = false
+                        },
+                    )
+                }
+                if (isUserAssigned) {
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Reset to inferred") },
+                        onClick = {
+                            onSetUserCategory(item.id, null)
+                            categoryMenuExpanded = false
+                        },
+                    )
                 }
             }
-
-            if (item.modelConfidence > 0f) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "P(block) ${"%.2f".format(item.modelConfidence)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                )
-            }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // ── Action buttons ────────────────────────────────────────────────────
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Button(
-                onClick = { onAllowClicked(item.id) },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                ),
-            ) {
-                Text("Allow")
-            }
+        if (item.modelConfidence > 0f) {
             Spacer(modifier = Modifier.width(8.dp))
-            OutlinedButton(
-                onClick = { onBlockClicked(item.id) },
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("Block")
-            }
+            Text(
+                text = "P(block) ${"%.2f".format(item.modelConfidence)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
         }
     }
 }
 
+// ── Action row ────────────────────────────────────────────────────────────────
+
 @Composable
-private fun ReviewedCardContent(
-    message: String,
-    messageColor: Color,
-    onUndoClicked: () -> Unit,
+private fun ActionRow(
+    action: EffectiveCardAction,
+    id: Long,
+    isPublishedRow: Boolean,
+    onAllowClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
+    onUndoClicked: (Long) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.labelMedium,
-            color = messageColor,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(
-            onClick = onUndoClicked,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-        ) {
+    Column {
+        when (action) {
+            EffectiveCardAction.ALLOW_ONLY -> {
+                // MODEL_BLOCKED + NONE: model suppressed it, offer to override
+                Button(
+                    onClick = { onAllowClicked(id) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Allow") }
+            }
+
+            EffectiveCardAction.BLOCK_AND_MUTE_ONLY -> {
+                // PUBLISHED + NONE: model passed it, offer to mute
+                OutlinedButton(
+                    onClick = { onBlockAndMuteClicked(id) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Block & Mute") }
+            }
+
+            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> {
+                // MODEL_BLOCKED + MANUALLY_ALLOWED: user overrode a block, offer to re-block
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { onBlockAndMuteClicked(id) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Block & Mute") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onUndoClicked(id) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Undo") }
+                }
+            }
+
+            EffectiveCardAction.ALLOW_WITH_UNDO -> {
+                // PUBLISHED + MANUALLY_BLOCKED: user muted it, offer to re-allow
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { onAllowClicked(id) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    ) { Text("Allow") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onUndoClicked(id) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Undo") }
+                }
+            }
+        }
+
+        // Subtext: only for PUBLISHED rows — "Block & Mute" doesn't suppress what already rang.
+        if (isPublishedRow) {
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Undo",
-                style = MaterialTheme.typography.labelMedium,
+                text = "Won't suppress already-delivered notifications · Recorded as training signal",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
         }
     }
