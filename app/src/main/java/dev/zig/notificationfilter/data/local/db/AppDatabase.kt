@@ -14,10 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationReviewEntity::class,
         AppCategoryOverrideEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
-@TypeConverters(StringListConverter::class, ReviewEnumConverters::class)
+@TypeConverters(StringListConverter::class, ReviewEnumConverters::class, FloatArrayConverter::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun notificationLogDao(): NotificationLogDao
@@ -119,6 +119,18 @@ abstract class AppDatabase : RoomDatabase() {
                         PRIMARY KEY(`packageName`)
                     )
                     """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Personal Memory: nullable embedding vector on notification_review,
+                // stored as a BLOB via FloatArrayConverter. Existing rows receive NULL —
+                // they only join the vector-search corpus once the user overrides them
+                // and an embedding is computed.
+                db.execSQL(
+                    "ALTER TABLE `notification_review` ADD COLUMN `embedding` BLOB"
                 )
             }
         }

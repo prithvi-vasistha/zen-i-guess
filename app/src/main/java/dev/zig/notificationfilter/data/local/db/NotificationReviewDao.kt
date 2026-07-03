@@ -45,6 +45,27 @@ interface NotificationReviewDao {
     @Query("UPDATE notification_review SET userAssignedCategory = :category WHERE id = :id")
     suspend fun updateUserAssignedCategory(id: Long, category: String?)
 
+    // ── Personal Memory (RAC / KNN) ───────────────────────────────────────────
+
+    // Single-row fetch used by PersonalMemoryRepository to read a notification's
+    // text before embedding it at override time.
+    @Query("SELECT * FROM notification_review WHERE id = :id")
+    suspend fun getById(id: Long): NotificationReviewEntity?
+
+    // Persists (or clears, when null) the embedding vector for one review row.
+    @Query("UPDATE notification_review SET embedding = :embedding WHERE id = :id")
+    suspend fun updateEmbedding(id: Long, embedding: FloatArray?)
+
+    // The vector-search corpus: every row the user has explicitly overridden AND
+    // for which an embedding has been computed. Bounded by the number of manual
+    // overrides, so an in-memory cosine scan over this set is cheap.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE userOverrideStatus IN ('MANUALLY_ALLOWED', 'MANUALLY_BLOCKED')
+        AND embedding IS NOT NULL
+    """)
+    suspend fun getPersonalMemory(): List<NotificationReviewEntity>
+
     // Classifier-blocked notifications older than the 24-hour active window — shown on the Archive screen.
     @Query("""
         SELECT * FROM notification_review

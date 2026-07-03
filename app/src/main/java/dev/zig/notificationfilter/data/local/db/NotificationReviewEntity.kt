@@ -39,4 +39,14 @@ data class NotificationReviewEntity(
     // User action on the model's decision. One of: "NONE", "MANUALLY_ALLOWED", "MANUALLY_BLOCKED".
     // "NONE" = model's verdict stands. Stored as String so future states require no migration.
     val userOverrideStatus: String = "NONE",
+    // ── Personal Memory (RAC / KNN, added in MIGRATION_6_7) ───────────────────
+    // Dense text embedding of this notification, populated only when the user
+    // overrides the decision (see PersonalMemoryRepository). NULL for every other row.
+    // Stored as a BLOB via FloatArrayConverter. Serves as the corpus for on-device
+    // vector similarity search in the ensemble classifier.
+    //
+    // NOTE: FloatArray gives this data class referential equals/hashCode. That is
+    // intentional and safe — the review UI maps entities to a separate UI model that
+    // never carries the embedding, so structural equality is never relied upon here.
+    val embedding: FloatArray? = null,
 )
