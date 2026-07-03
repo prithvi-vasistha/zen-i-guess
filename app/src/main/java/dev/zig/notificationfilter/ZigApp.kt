@@ -4,26 +4,37 @@ import android.Manifest
 import android.app.Application
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
+import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
-class ZigApp : Application() {
+class ZigApp : Application(), Configuration.Provider {
 
     @Inject lateinit var managedAppDao: ManagedAppDao
     @Inject lateinit var keywordRuleDao: KeywordRuleDao
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
+    @Inject lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
 
     @Inject
     @ApplicationScope
     lateinit var appScope: CoroutineScope
+
+    // Provides Hilt-aware WorkManager configuration so @HiltWorker can receive
+    // injected dependencies. WorkManager's default auto-init is disabled in the manifest
+    // (tools:node="remove" on the WorkManagerInitializer provider) so we own init here.
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
 
     override fun onCreate() {
         super.onCreate()
@@ -42,6 +53,11 @@ class ZigApp : Application() {
         // Register the ContentObserver for the full process lifetime so any contacts
         // change (add, edit, delete) is reflected in the Rust HashSet automatically.
         contactsSyncManager.register()
+
+        // Enqueue the daily summary worker. KEEP policy means this is a no-op on every
+        // subsequent launch once already scheduled. Users who opt out call cancel() from
+        // the ViewModel, which removes the unique work entry; re-enabling calls schedule().
+        dailySummaryScheduler.schedule()
 
         // Perform the initial sync now if READ_CONTACTS was already granted on a previous
         // launch. If not yet granted, MainActivity.onResume() calls requestSyncIfNeeded()

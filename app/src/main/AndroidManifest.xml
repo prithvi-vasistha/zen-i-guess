@@ -82,6 +82,23 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            WorkManager ships a default ContentProvider initialiser that calls
+            WorkManager.initialize() automatically. We disable it here so that
+            ZigApp.workManagerConfiguration (which supplies HiltWorkerFactory) is
+            used instead — required for @HiltWorker injection to function.
+        -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
     </application>
 
 </manifest>
