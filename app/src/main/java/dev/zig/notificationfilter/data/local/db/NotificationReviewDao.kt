@@ -39,6 +39,9 @@ interface NotificationReviewDao {
     @Query("UPDATE notification_review SET reviewState = :state, syncStatus = 'UNPROCESSED' WHERE id = :id")
     suspend fun updateReviewState(id: Long, state: String)
 
+    @Query("UPDATE notification_review SET userOverrideStatus = :status WHERE id = :id")
+    suspend fun updateOverrideStatus(id: Long, status: String)
+
     // Classifier-blocked notifications older than the 24-hour active window — shown on the Archive screen.
     @Query("""
         SELECT * FROM notification_review
@@ -47,6 +50,34 @@ interface NotificationReviewDao {
         ORDER BY timestamp DESC
     """)
     fun getArchivedNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>>
+
+    // Search across packageName, title, and content with a LIKE '%query%' match.
+    // Applied to the active window (timestamp >= cutoffTimestamp) for the inbox, and
+    // to the archive window (timestamp < cutoffTimestamp) for the archive screen.
+    // Sorting is applied in Kotlin on the emitted list — see ReviewFilter / SortBy.
+    // Phase B search queries mirror the existing window filters but add LIKE matching.
+    // Phase D will expand the IN clause to include 'PUBLISHED' for context-aware actions.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
+        AND timestamp >= :cutoffTimestamp
+        AND (packageName LIKE '%' || :query || '%'
+          OR title      LIKE '%' || :query || '%'
+          OR content    LIKE '%' || :query || '%')
+        ORDER BY timestamp DESC
+    """)
+    fun searchActiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
+
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
+        AND timestamp < :cutoffTimestamp
+        AND (packageName LIKE '%' || :query || '%'
+          OR title      LIKE '%' || :query || '%'
+          OR content    LIKE '%' || :query || '%')
+        ORDER BY timestamp DESC
+    """)
+    fun searchArchiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
     // Called by the retraining WorkManager to fetch only rows that need to be
     // written to the master training CSV — avoids scanning the full table nightly.
