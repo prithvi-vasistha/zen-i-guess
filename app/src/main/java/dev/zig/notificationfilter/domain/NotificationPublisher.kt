@@ -29,7 +29,17 @@ class NotificationPublisher @Inject constructor(
         // upgrades to an already-registered channel ID, so a new ID forces a clean slate.
         private const val CHANNEL_ID = "zig_alerts_v2"
         private const val CHANNEL_ID_LEGACY = "resurrected_alerts"
+
+        // Separate channel for the daily summary so users can mute it independently
+        // of the high-importance forwarded alert channel.
+        internal const val CHANNEL_ID_SUMMARY = "zig_daily_summary"
+
+        // Stable ID for the daily summary notification — only ever one at a time.
+        internal const val NOTIF_ID_SUMMARY = 0x7A690001
+
         const val EXTRA_ZIG_NOTIF_TO_DISMISS = "zig_notif_to_dismiss"
+        const val EXTRA_NAVIGATE_TO = "zig_navigate_to"
+        const val NAV_TARGET_REVIEW = "review"
     }
 
     init {
@@ -37,6 +47,12 @@ class NotificationPublisher @Inject constructor(
         manager.deleteNotificationChannel(CHANNEL_ID_LEGACY)
         val channel = NotificationChannel(CHANNEL_ID, "Important Alerts", NotificationManager.IMPORTANCE_HIGH)
         manager.createNotificationChannel(channel)
+        val summaryChannel = NotificationChannel(
+            CHANNEL_ID_SUMMARY,
+            "Daily Summary",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply { description = "End-of-day recap of notifications ZiG reviewed today" }
+        manager.createNotificationChannel(summaryChannel)
     }
 
     // POST_NOTIFICATIONS is a runtime permission on API 33+. Granting it is the
@@ -122,6 +138,43 @@ class NotificationPublisher @Inject constructor(
             .build()
 
         NotificationManagerCompat.from(context).notify(zigNotifId, notification)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun postDailySummary(count: Int) {
+        if (count <= 0) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+
+        val tapIntent = PendingIntent.getActivity(
+            context,
+            NOTIF_ID_SUMMARY,
+            Intent().apply {
+                component = ComponentName(context.packageName, "${context.packageName}.MainActivity")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_NAVIGATE_TO, NAV_TARGET_REVIEW)
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+        val body = "ZiG reviewed $count notification${if (count == 1) "" else "s"} today. Tap to review."
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_SUMMARY)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("ZiG Daily Summary")
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setContentIntent(tapIntent)
+            .setAutoCancel(true)
+            .build()
+
+        NotificationManagerCompat.from(context).notify(NOTIF_ID_SUMMARY, notification)
     }
 
     private fun resolveAppName(packageName: String): String {
