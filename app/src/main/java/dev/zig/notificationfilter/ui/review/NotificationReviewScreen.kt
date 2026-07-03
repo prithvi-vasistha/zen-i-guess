@@ -6,8 +6,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,9 +21,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
@@ -35,9 +35,6 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,10 +70,10 @@ import java.time.format.DateTimeFormatter
 // Derived from systemDecision + userOverrideStatus at render time.
 
 private enum class EffectiveCardAction {
-    ALLOW_ONLY,               // MODEL_BLOCKED + NONE          → show Allow
-    BLOCK_AND_MUTE_ONLY,      // PUBLISHED + NONE              → show Block & Mute
+    ALLOW_ONLY,               // MODEL_BLOCKED + NONE             → show Allow
+    BLOCK_AND_MUTE_ONLY,      // PUBLISHED + NONE                 → show Block & Mute
     BLOCK_AND_MUTE_WITH_UNDO, // MODEL_BLOCKED + MANUALLY_ALLOWED → Block & Mute + Undo
-    ALLOW_WITH_UNDO;          // PUBLISHED + MANUALLY_BLOCKED  → Allow + Undo
+    ALLOW_WITH_UNDO;          // PUBLISHED + MANUALLY_BLOCKED     → Allow + Undo
 
     companion object {
         fun from(systemDecision: String, userOverrideStatus: String): EffectiveCardAction {
@@ -263,8 +260,9 @@ private fun NotificationReviewScreen(
 }
 
 // ── Sort dropdowns ────────────────────────────────────────────────────────────
+// Use Box + transparent clickable overlay over a read-only OutlinedTextField so
+// clicks are reliably captured without ExposedDropdownMenuBox event-handling quirks.
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SortFieldMenu(
     current: SortField,
@@ -272,24 +270,25 @@ private fun SortFieldMenu(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier,
-    ) {
+    Box(modifier = modifier) {
         OutlinedTextField(
             value = current.displayLabel(),
             onValueChange = {},
             readOnly = true,
             label = { Text("Sort by", style = MaterialTheme.typography.labelSmall) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                .fillMaxWidth(),
+            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
         )
-        ExposedDropdownMenu(
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { expanded = true },
+        )
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
@@ -300,14 +299,12 @@ private fun SortFieldMenu(
                         onSelect(field)
                         expanded = false
                     },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SortDirectionMenu(
     current: SortDirection,
@@ -316,24 +313,25 @@ private fun SortDirectionMenu(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        modifier = modifier,
-    ) {
+    Box(modifier = modifier) {
         OutlinedTextField(
             value = current.displayLabel(sortField),
             onValueChange = {},
             readOnly = true,
             label = { Text("Order", style = MaterialTheme.typography.labelSmall) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                .fillMaxWidth(),
+            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
+            modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
         )
-        ExposedDropdownMenu(
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { expanded = true },
+        )
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
@@ -344,7 +342,6 @@ private fun SortDirectionMenu(
                         onSelect(direction)
                         expanded = false
                     },
-                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
                 )
             }
         }
@@ -353,7 +350,6 @@ private fun SortDirectionMenu(
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ReviewListContent(
     groupedItems: Map<String, List<NotificationReviewUiItem>>,
@@ -371,29 +367,70 @@ private fun ReviewListContent(
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
         groupedItems.forEach { (packageName, items) ->
-            stickyHeader(key = "header_$packageName") {
-                AppGroupHeader(
-                    appLabel = packageLabels[packageName]
-                        ?: packageName.substringAfterLast('.'),
+            item(key = "group_$packageName") {
+                AppGroupCard(
+                    packageName = packageName,
+                    items = items,
+                    appLabel = packageLabels[packageName] ?: packageName.substringAfterLast('.'),
                     currentOverride = categoryOverrides[packageName],
-                    onSetOverride = { category -> onSetCategoryOverride(packageName, category) },
-                )
-            }
-            items(items = items, key = { it.id }) { item ->
-                ReviewItemCard(
-                    item = item,
+                    onSetCategoryOverride = { category -> onSetCategoryOverride(packageName, category) },
                     onAllowClicked = onAllowClicked,
                     onBlockAndMuteClicked = onBlockAndMuteClicked,
                     onUndoClicked = onUndoClicked,
                     onSetUserCategory = onSetUserCategory,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
         }
     }
 }
 
-// ── Tier A: App-level sticky header ──────────────────────────────────────────
+// ── Tier A: App group card (header + all notifications for one app) ───────────
+
+@Composable
+private fun AppGroupCard(
+    packageName: String,
+    items: List<NotificationReviewUiItem>,
+    appLabel: String,
+    currentOverride: String?,
+    onSetCategoryOverride: (String?) -> Unit,
+    onAllowClicked: (Long) -> Unit,
+    onBlockAndMuteClicked: (Long) -> Unit,
+    onUndoClicked: (Long) -> Unit,
+    onSetUserCategory: (Long, String?) -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        colors = CardDefaults.cardColors(containerColor = ZigGreen.copy(alpha = 0.10f)),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column {
+            AppGroupHeader(
+                appLabel = appLabel,
+                currentOverride = currentOverride,
+                onSetOverride = onSetCategoryOverride,
+            )
+            HorizontalDivider(color = ZigGreen.copy(alpha = 0.18f), thickness = 0.5.dp)
+            Column(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items.forEach { item ->
+                    ReviewItemCard(
+                        item = item,
+                        onAllowClicked = onAllowClicked,
+                        onBlockAndMuteClicked = onBlockAndMuteClicked,
+                        onUndoClicked = onUndoClicked,
+                        onSetUserCategory = onSetUserCategory,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── App group header (lives inside the group card) ────────────────────────────
 
 @Composable
 private fun AppGroupHeader(
@@ -407,14 +444,13 @@ private fun AppGroupHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = appLabel,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
             color = ZigGreen,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -482,8 +518,8 @@ private fun ReviewItemCard(
 
     val containerColor by animateColorAsState(
         targetValue = when (effectiveAction) {
-            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.12f)
-            EffectiveCardAction.ALLOW_WITH_UNDO          -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.20f)
+            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.15f)
+            EffectiveCardAction.ALLOW_WITH_UNDO          -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
             else                                         -> MaterialTheme.colorScheme.surface
         },
         animationSpec = tween(durationMillis = 300),
@@ -495,7 +531,6 @@ private fun ReviewItemCard(
         colors = CardDefaults.cardColors(containerColor = containerColor),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            // Header row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -522,19 +557,17 @@ private fun ReviewItemCard(
                     text = item.content,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
+                    maxLines = 8,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Category chip + confidence
             CategoryRow(item = item, onSetUserCategory = onSetUserCategory)
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Action buttons — animated on effective action transitions
             AnimatedContent(
                 targetState = effectiveAction,
                 transitionSpec = {
@@ -626,7 +659,6 @@ private fun ActionRow(
     Column {
         when (action) {
             EffectiveCardAction.ALLOW_ONLY -> {
-                // MODEL_BLOCKED + NONE: model suppressed it, offer to override
                 Button(
                     onClick = { onAllowClicked(id) },
                     modifier = Modifier.fillMaxWidth(),
@@ -634,7 +666,6 @@ private fun ActionRow(
             }
 
             EffectiveCardAction.BLOCK_AND_MUTE_ONLY -> {
-                // PUBLISHED + NONE: model passed it, offer to mute
                 OutlinedButton(
                     onClick = { onBlockAndMuteClicked(id) },
                     modifier = Modifier.fillMaxWidth(),
@@ -642,7 +673,6 @@ private fun ActionRow(
             }
 
             EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> {
-                // MODEL_BLOCKED + MANUALLY_ALLOWED: user overrode a block, offer to re-block
                 Row(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
                         onClick = { onBlockAndMuteClicked(id) },
@@ -657,7 +687,6 @@ private fun ActionRow(
             }
 
             EffectiveCardAction.ALLOW_WITH_UNDO -> {
-                // PUBLISHED + MANUALLY_BLOCKED: user muted it, offer to re-allow
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = { onAllowClicked(id) },
@@ -675,7 +704,6 @@ private fun ActionRow(
             }
         }
 
-        // Subtext: only for PUBLISHED rows — "Block & Mute" doesn't suppress what already rang.
         if (isPublishedRow) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(

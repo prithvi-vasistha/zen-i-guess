@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.service
 
 import android.app.KeyguardManager
 import android.app.Notification
+import android.os.Bundle
 // import android.content.pm.PackageManager  // Phase 1: unused — restored if needed in future lanes
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -81,8 +82,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         // 4. Notifications with no visible text are shell/update pings — nothing to show.
         val title = resolveTitle(sbn)
-        val content = sbn.notification?.extras
-            ?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val content = resolveContent(sbn.notification)
         if (title.isBlank() && content.isBlank()) return
         // ──────────────────────────────────────────────────────────────────────
 
@@ -193,6 +193,24 @@ class ZigNotificationListenerService : NotificationListenerService() {
             review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
                 result.confidence, inferredCategory)
         }
+    }
+
+    // Extracts the best available text from a notification.
+    // For MessagingStyle notifications (WhatsApp, Messages, etc.), EXTRA_MESSAGES contains
+    // all messages in the conversation in chronological order. Joining them with newlines
+    // gives the classifier and the review screen full conversation context instead of
+    // just the latest message from EXTRA_TEXT.
+    private fun resolveContent(notification: android.app.Notification?): String {
+        val extras = notification?.extras ?: return ""
+        @Suppress("DEPRECATION")
+        val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+            ?.filterIsInstance<Bundle>()
+        if (!messages.isNullOrEmpty()) {
+            return messages
+                .mapNotNull { it.getCharSequence("text")?.toString()?.takeIf { msg -> msg.isNotBlank() } }
+                .joinToString("\n")
+        }
+        return extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
     }
 
     private fun resolveTitle(sbn: StatusBarNotification): String {
