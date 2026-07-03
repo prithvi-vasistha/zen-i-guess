@@ -105,6 +105,15 @@ interface NotificationReviewDao {
     """)
     fun searchArchiveFlow(archiveCutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
+    // Count of reviewable notifications (MODEL_BLOCKED + PUBLISHED) with a timestamp on or
+    // after startOfDayMs. Used by DailySummaryWorker to populate the notification body.
+    @Query("""
+        SELECT COUNT(*) FROM notification_review
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
+        AND timestamp >= :startOfDayMs
+    """)
+    suspend fun countReviewableToday(startOfDayMs: Long): Int
+
     // Called by the retraining WorkManager to fetch only rows that need to be
     // written to the master training CSV — avoids scanning the full table nightly.
     @Query("SELECT * FROM notification_review WHERE syncStatus = 'UNPROCESSED'")
