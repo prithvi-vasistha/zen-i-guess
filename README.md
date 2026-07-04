@@ -5,7 +5,10 @@
 
   <p><strong>A privacy-focused Android notification interceptor that classifies, filters, and surfaces the notifications that actually matter — entirely on-device, with nothing ever leaving your phone.</strong></p>
 
+  <p><strong>🌐 Website:</strong> <a href="https://prithvi-vasistha.github.io/zig-landing/">prithvi-vasistha.github.io/zig-landing</a></p>
+
   <p>
+    <a href="https://prithvi-vasistha.github.io/zig-landing/"><img src="https://img.shields.io/badge/website-live-3DDC84" alt="Website" /></a>
     <img src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white" alt="Platform: Android" />
     <img src="https://img.shields.io/badge/min%20SDK-26-3DDC84" alt="Min SDK 26" />
     <img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin 2.0.21" />
