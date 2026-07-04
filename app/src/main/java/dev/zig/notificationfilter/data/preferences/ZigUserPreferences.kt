@@ -30,9 +30,16 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_ONBOARDING_COMPLETED, false)
         set(value) = prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETED, value).apply()
 
+    // One-time guard: the two sample notifications used by the tour are inserted only
+    // on the first launch. Once seeded, they behave like any real notification.
+    var demoSeeded: Boolean
+        get() = prefs.getBoolean(KEY_DEMO_SEEDED, false)
+        set(value) = prefs.edit().putBoolean(KEY_DEMO_SEEDED, value).apply()
+
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
         const val KEY_TERMS_ACCEPTED = "terms_accepted"
         const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
+        const val KEY_DEMO_SEEDED = "demo_seeded"
     }
 }

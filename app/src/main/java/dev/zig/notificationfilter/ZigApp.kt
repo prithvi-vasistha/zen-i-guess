@@ -10,6 +10,7 @@ import dagger.hilt.android.HiltAndroidApp
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
@@ -25,6 +26,7 @@ class ZigApp : Application(), Configuration.Provider {
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
+    @Inject lateinit var demoDataSeeder: DemoDataSeeder
 
     @Inject
     @ApplicationScope
@@ -48,6 +50,9 @@ class ZigApp : Application(), Configuration.Provider {
             keywordRuleDao.getAllSnapshot().forEach { rule ->
                 NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
             }
+            // Insert the two sample notifications on first launch so the onboarding tour
+            // has real cards to demonstrate Allow / Block / Undo and the category chip.
+            demoDataSeeder.seedIfNeeded()
         }
 
         // Register the ContentObserver for the full process lifetime so any contacts

@@ -86,7 +86,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Column {
+                Column(modifier = Modifier.coachMark(TourKeys.TITLE_RULES)) {
                     Text(
                         text = "Custom Rules Vault",
                         style = MaterialTheme.typography.titleLarge,

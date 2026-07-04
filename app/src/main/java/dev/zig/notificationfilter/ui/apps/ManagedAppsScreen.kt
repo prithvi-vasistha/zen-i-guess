@@ -72,7 +72,7 @@ fun ManagedAppsScreen(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Column {
+                Column(modifier = Modifier.coachMark(TourKeys.TITLE_APPS)) {
                     Text(
                         text = "Managed Apps",
                         style = MaterialTheme.typography.titleLarge,
@@ -276,7 +276,11 @@ private fun AppRow(
         Switch(
             checked = app.isManaged,
             onCheckedChange = onToggle,
-            modifier = switchModifier.padding(end = 16.dp),
+            // Padding applied first (outer) so the coach-mark measures only the Switch itself,
+            // not the trailing 16dp gap — otherwise the tour spotlight sits off-centre.
+            modifier = Modifier
+                .padding(end = 16.dp)
+                .then(switchModifier),
         )
     }
 }

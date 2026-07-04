@@ -221,6 +221,7 @@ private fun NotificationReviewScreen(
                     Text(
                         text = if (showArchive) "Archive" else "Notifications",
                         style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.coachMark(TourKeys.TITLE_REVIEW),
                     )
                 },
                 actions = {
@@ -231,7 +232,10 @@ private fun NotificationReviewScreen(
                         Text(if (showArchive) "Active" else "Archive")
                     }
                     Box {
-                        IconButton(onClick = { showSettingsMenu = true }) {
+                        IconButton(
+                            onClick = { showSettingsMenu = true },
+                            modifier = Modifier.coachMark(TourKeys.REVIEW_SETTINGS),
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
                                 contentDescription = "Settings",
@@ -525,7 +529,7 @@ private fun ReviewListContent(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 16.dp),
     ) {
-        groupedItems.forEach { (packageName, items) ->
+        groupedItems.entries.forEachIndexed { groupIndex, (packageName, items) ->
             item(key = "group_$packageName") {
                 AppGroupCard(
                     packageName = packageName,
@@ -537,6 +541,8 @@ private fun ReviewListContent(
                     onBlockAndMuteClicked = onBlockAndMuteClicked,
                     onUndoClicked = onUndoClicked,
                     onSetUserCategory = onSetUserCategory,
+                    // Spotlight the very first card's category chip during the onboarding tour.
+                    spotlightFirstCategory = groupIndex == 0,
                 )
             }
         }
@@ -556,6 +562,7 @@ private fun AppGroupCard(
     onBlockAndMuteClicked: (Long) -> Unit,
     onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
+    spotlightFirstCategory: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(true) }
 
@@ -580,13 +587,19 @@ private fun AppGroupCard(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items.forEach { item ->
+                    items.forEachIndexed { itemIndex, item ->
                         ReviewItemCard(
                             item = item,
                             onAllowClicked = onAllowClicked,
                             onBlockAndMuteClicked = onBlockAndMuteClicked,
                             onUndoClicked = onUndoClicked,
                             onSetUserCategory = onSetUserCategory,
+                            // Only the first card of the first group carries the tour spotlight.
+                            categoryChipModifier = if (spotlightFirstCategory && itemIndex == 0) {
+                                Modifier.coachMark(TourKeys.REVIEW_CATEGORY)
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }
@@ -691,6 +704,7 @@ private fun ReviewItemCard(
     onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
+    categoryChipModifier: Modifier = Modifier,
 ) {
     val effectiveAction = EffectiveCardAction.from(item.systemDecision, item.userOverrideStatus)
 
@@ -742,7 +756,11 @@ private fun ReviewItemCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            CategoryRow(item = item, onSetUserCategory = onSetUserCategory)
+            CategoryRow(
+                item = item,
+                onSetUserCategory = onSetUserCategory,
+                chipModifier = categoryChipModifier,
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -772,6 +790,7 @@ private fun ReviewItemCard(
 private fun CategoryRow(
     item: NotificationReviewUiItem,
     onSetUserCategory: (Long, String?) -> Unit,
+    chipModifier: Modifier = Modifier,
 ) {
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     val displayCategory = (item.userAssignedCategory ?: item.inferredCategory).toDisplayCategory()
@@ -780,6 +799,7 @@ private fun CategoryRow(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box {
             SuggestionChip(
+                modifier = chipModifier,
                 onClick = { categoryMenuExpanded = true },
                 label = { Text(displayCategory, style = MaterialTheme.typography.labelSmall) },
                 icon = if (isUserAssigned) {

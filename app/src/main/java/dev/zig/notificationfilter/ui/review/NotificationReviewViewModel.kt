@@ -7,6 +7,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
+import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
@@ -225,7 +226,10 @@ class NotificationReviewViewModel @Inject constructor(
         if (toResolve.isEmpty()) return
         withContext(Dispatchers.IO) {
             toResolve.forEach { pkg ->
-                val label = try {
+                val label = if (pkg == DemoDataSeeder.DEMO_PACKAGE) {
+                    // Synthetic demo package — not installed, so name it explicitly.
+                    DemoDataSeeder.DEMO_APP_LABEL
+                } else try {
                     val info = context.packageManager.getApplicationInfo(pkg, 0)
                     context.packageManager.getApplicationLabel(info).toString()
                 } catch (_: Exception) {

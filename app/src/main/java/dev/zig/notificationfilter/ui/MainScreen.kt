@@ -31,6 +31,7 @@ import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
 import dev.zig.notificationfilter.ui.tour.CoachMarkRegistry
 import dev.zig.notificationfilter.ui.tour.LocalCoachMarkRegistry
 import dev.zig.notificationfilter.ui.tour.TOUR_STEPS
+import dev.zig.notificationfilter.ui.tour.TourKeys
 import dev.zig.notificationfilter.ui.tour.TourOverlay
 import dev.zig.notificationfilter.ui.tour.coachMark
 import dev.zig.notificationfilter.ui.tour.navKeyFor
@@ -73,7 +74,7 @@ fun MainScreen(
     ) {
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            NavigationBar(modifier = Modifier.coachMark(TourKeys.NAV_BAR)) {
                 ZigScreen.all.forEachIndexed { index, screen ->
                     val selected = pagerState.currentPage == index
                     NavigationBarItem(

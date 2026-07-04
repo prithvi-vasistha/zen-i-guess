@@ -30,8 +30,18 @@ object TourKeys {
 
     const val APPS_MANAGE_SWITCH = "apps_manage_switch"
     const val REVIEW_ARCHIVE = "review_archive"
+    const val REVIEW_CATEGORY = "review_category"
+    const val REVIEW_SETTINGS = "review_settings"
     const val RULES_INPUT = "rules_input"
     const val LOGS_HEADER = "logs_header"
+
+    // The bottom navigation bar — kept visible (undimmed, no border) for the whole tour.
+    const val NAV_BAR = "nav_bar"
+
+    // Screen-name titles — each is spotlighted once as its screen is introduced.
+    const val TITLE_REVIEW = "title_review"
+    const val TITLE_APPS = "title_apps"
+    const val TITLE_RULES = "title_rules"
 }
 
 fun navKeyFor(screen: ZigScreen): String = when (screen) {
@@ -58,7 +68,7 @@ val TOUR_STEPS: List<TourStep> = listOf(
     ),
     TourStep(
         tab = TAB_APPS,
-        targetKey = TourKeys.NAV_APPS,
+        targetKey = TourKeys.TITLE_APPS,
         title = "Apps",
         body = "Choose which apps ZiG manages. Apps you don't select pass through completely untouched.",
     ),
@@ -70,9 +80,15 @@ val TOUR_STEPS: List<TourStep> = listOf(
     ),
     TourStep(
         tab = TAB_REVIEW,
-        targetKey = TourKeys.NAV_REVIEW,
+        targetKey = TourKeys.TITLE_REVIEW,
         title = "Notifications",
-        body = "The last 24 hours of alerts ZiG processed. Allow or Block each one — your choices train ZiG to your preferences.",
+        body = "The last 24 hours of alerts ZiG processed. Allow or Block each one — your choices train ZiG to your preferences. We've added two sample notifications so you can try it.",
+    ),
+    TourStep(
+        tab = TAB_REVIEW,
+        targetKey = TourKeys.REVIEW_CATEGORY,
+        title = "Category",
+        body = "The on-device model tags each notification with a category and shows it here. Tap the chip to correct it — ZiG learns from your choice.",
     ),
     TourStep(
         tab = TAB_REVIEW,
@@ -81,8 +97,14 @@ val TOUR_STEPS: List<TourStep> = listOf(
         body = "Open a 30-day history here to find and fix anything you mislabelled more than a day ago.",
     ),
     TourStep(
+        tab = TAB_REVIEW,
+        targetKey = TourKeys.REVIEW_SETTINGS,
+        title = "Settings",
+        body = "Configure ZiG here — like the daily 8 PM recap of everything it filtered for you.",
+    ),
+    TourStep(
         tab = TAB_RULES,
-        targetKey = TourKeys.NAV_RULES,
+        targetKey = TourKeys.TITLE_RULES,
         title = "Rules",
         body = "Keyword rules that bypass the AI entirely for time-sensitive alerts.",
     ),

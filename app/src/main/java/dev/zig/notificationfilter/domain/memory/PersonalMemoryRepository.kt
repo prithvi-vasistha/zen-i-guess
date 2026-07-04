@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.domain.memory
 
+import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.domain.embedding.TextEmbedder
@@ -40,6 +41,8 @@ class PersonalMemoryRepository @Inject constructor(
 
     override suspend fun rememberOverride(id: Long) {
         val row = dao.getById(id) ?: return
+        // Demo rows must never enter the corpus — they are illustrative, not the user's data.
+        if (row.jobId.startsWith(DemoDataSeeder.DEMO_JOB_PREFIX)) return
         val embedding = embedder.embed(embeddingText(row)) ?: return
         dao.updateEmbedding(id, embedding)
         invalidate()
