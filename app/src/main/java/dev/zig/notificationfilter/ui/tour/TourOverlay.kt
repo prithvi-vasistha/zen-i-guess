@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.ui.tour
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -31,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -42,9 +44,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.zig.notificationfilter.ui.theme.ZigGreen
 import dev.zig.notificationfilter.ui.theme.ZigOnGreen
+import kotlinx.coroutines.delay
 import kotlin.math.max
 
 private val SCRIM_COLOR = Color.Black.copy(alpha = 0.78f)
+
+// Step-transition timing — a deliberate, fluid change rather than an instant snap.
+private const val EXIT_FADE_MS = 220      // fade the current spotlight out before moving
+private const val SETTLE_MS = 420         // pause on the freshly-loaded page before revealing
+private const val SAME_PAGE_GAP_MS = 140  // brief beat between two targets on the same page
+private const val REVEAL_MS = 320         // eased fade of the spotlight and tooltip
 
 /**
  * Full-screen tour layer drawn above the real app. For each step it drives the pager
@@ -61,26 +70,33 @@ fun TourOverlay(
 ) {
     val step = controller.currentStep
 
-    // Controls whether the current step's target spotlight (cut-out + border + tooltip) is
-    // shown. The bottom nav bar stays visible regardless. When a step changes tabs we first
-    // remove the old page's highlight, animate to the target page, and only then reveal the
-    // new highlight — so the spotlight never appears at a stale location mid-transition.
-    var spotlightVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(controller.currentIndex) {
-        if (pagerState.currentPage != step.tab) {
-            spotlightVisible = false                  // remove highlighting on the current page
-            pagerState.animateScrollToPage(step.tab)  // animate the navigation
-        }
-        spotlightVisible = true                       // call the highlighters for this page
-    }
-
     val targetRect: Rect? = step.targetKey?.let { controller.registry.bounds[it] }
     val navRect: Rect? = controller.registry.bounds[TourKeys.NAV_BAR]
 
-    // Fade the spotlight in once its page is settled and the target has reported bounds.
+    // Whether the current step's spotlight and tooltip should be shown. Turned off during a
+    // transition and back on once the destination page has settled (see the sequence below).
+    var armed by remember { mutableStateOf(false) }
+
+    // A deliberate, fluid step change: fade the current spotlight out, animate to the step's
+    // page, give the user a beat to take the new screen in, then fade the new spotlight in.
+    // Only timing and opacity are animated here — nothing is ever repositioned.
+    LaunchedEffect(controller.currentIndex) {
+        armed = false                                    // fade the current spotlight out
+        delay(EXIT_FADE_MS.toLong())
+        if (pagerState.currentPage != step.tab) {
+            pagerState.animateScrollToPage(step.tab)      // smooth page navigation
+            delay(SETTLE_MS.toLong())                     // let the user take the new page in
+        } else {
+            delay(SAME_PAGE_GAP_MS.toLong())              // brief beat between same-page targets
+        }
+        armed = true                                     // fade the new spotlight in
+    }
+
+    // Eased fade for the spotlight and tooltip; reaches full only once the step is armed and
+    // its target has reported bounds.
     val reveal by animateFloatAsState(
-        targetValue = if (spotlightVisible && (step.targetKey == null || targetRect != null)) 1f else 0f,
-        animationSpec = tween(durationMillis = 200),
+        targetValue = if (armed && (step.targetKey == null || targetRect != null)) 1f else 0f,
+        animationSpec = tween(durationMillis = REVEAL_MS, easing = FastOutSlowInEasing),
         label = "spotlight_reveal",
     )
 
@@ -90,11 +106,11 @@ fun TourOverlay(
         val maxW = constraints.maxWidth.toFloat()
         val maxH = constraints.maxHeight.toFloat()
 
-        // Center-preserving clamp: if the padded target overflows the screen, shrink it
-        // symmetrically around its center rather than cropping one edge — so the highlight
-        // stays centered on the target (e.g. the settings gear, the right-edge switch) while
-        // its border stays fully on-screen.
-        val cutout = if (spotlightVisible) targetRect?.inflate(padPx)?.let { r ->
+        // Center-preserving clamp (unchanged): if the padded target overflows the screen,
+        // shrink it symmetrically around its center rather than cropping one edge — so the
+        // highlight stays centered on the target (settings gear, right-edge switch) while its
+        // border stays fully on-screen.
+        val targetCutout: Rect? = targetRect?.inflate(padPx)?.let { r ->
             val shrinkX = max(
                 (marginPx - r.left).coerceAtLeast(0f),
                 (r.right - (maxW - marginPx)).coerceAtLeast(0f),
@@ -104,7 +120,17 @@ fun TourOverlay(
                 (r.bottom - (maxH - marginPx)).coerceAtLeast(0f),
             )
             Rect(r.left + shrinkX, r.top + shrinkY, r.right - shrinkX, r.bottom - shrinkY)
-        } else null
+        }
+
+        // The cut-out actually drawn. Held to the outgoing target while the spotlight fades out
+        // (armed == false) so the exit animates from the old position, then swapped to the new
+        // target once the step is armed. Identical geometry to targetCutout — never repositioned.
+        var shownCutout by remember { mutableStateOf<Rect?>(null) }
+        LaunchedEffect(armed, targetCutout) {
+            if (armed) shownCutout = targetCutout
+        }
+        // What actually draws this frame: the shown cut-out, only while the fade is visible.
+        val spotlight = shownCutout?.takeIf { reveal > 0.01f }
 
         // Scrim + spotlight. This layer also blocks every touch on the app beneath.
         Canvas(
@@ -123,7 +149,7 @@ fun TourOverlay(
             // Path.op(Difference) cuts each hole without a compositing layer (no BlendMode.Clear).
             val holes = listOfNotNull(
                 navRect?.let { it to 0f },
-                cutout?.let { it to cornerPx },
+                spotlight?.let { it to cornerPx },
             )
             if (holes.isEmpty()) {
                 drawRect(color = SCRIM_COLOR)
@@ -137,7 +163,7 @@ fun TourOverlay(
             }
 
             // Green highlight border around the step's target only — never the nav bar.
-            cutout?.let {
+            spotlight?.let {
                 drawRoundRect(
                     color = ZigGreen.copy(alpha = reveal),
                     topLeft = it.topLeft,
@@ -148,14 +174,16 @@ fun TourOverlay(
             }
         }
 
-        // Show the tooltip only while this page's spotlight is active — hidden during the
-        // navigation animation so it doesn't flash at the wrong position.
-        if (spotlightVisible) {
+        // Show the tooltip only while this step is armed — hidden during the navigation
+        // animation so it doesn't flash at the wrong position — and fade it in with the
+        // spotlight. Positioning is unchanged.
+        if (armed) {
+            val sc = shownCutout
             // Anchor the tooltip clear of the spotlight: below a top-half target, above a
             // bottom-half one, centered when there's no target.
             val alignment = when {
-                cutout == null -> Alignment.Center
-                cutout.center.y < maxH / 2f -> Alignment.BottomCenter
+                sc == null -> Alignment.Center
+                sc.center.y < maxH / 2f -> Alignment.BottomCenter
                 else -> Alignment.TopCenter
             }
             // Bottom-anchored tooltips must clear the always-visible nav bar so they never
@@ -174,6 +202,7 @@ fun TourOverlay(
                 step = step,
                 modifier = Modifier
                     .align(alignment)
+                    .alpha(reveal)
                     .then(tooltipPadding),
             )
         }
