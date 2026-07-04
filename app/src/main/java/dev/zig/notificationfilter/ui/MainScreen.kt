@@ -116,7 +116,7 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding),
         ) { page ->
             when (ZigScreen.all[page]) {
-                ZigScreen.Review -> NotificationReviewRoute()
+                ZigScreen.Review -> NotificationReviewRoute(onRestartTour = { tourActive = true })
                 ZigScreen.Apps -> ManagedAppsScreen()
                 ZigScreen.Rules -> CustomRulesScreen()
                 ZigScreen.Logs -> LogsScreen()

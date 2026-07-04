@@ -32,7 +32,11 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -133,7 +137,10 @@ private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 @Composable
-fun NotificationReviewRoute(modifier: Modifier = Modifier) {
+fun NotificationReviewRoute(
+    onRestartTour: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val viewModel: NotificationReviewViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
     val archiveUiState by viewModel.archiveUiState.collectAsState()
@@ -143,6 +150,7 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
     val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
+    val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -177,6 +185,9 @@ fun NotificationReviewRoute(modifier: Modifier = Modifier) {
         onSetUserCategory = viewModel::setUserAssignedCategory,
         dailySummaryEnabled = dailySummaryEnabled,
         onDailySummaryToggled = viewModel::setDailySummaryEnabled,
+        sensitiveNotificationsEnabled = sensitiveNotificationsEnabled,
+        onSensitiveNotificationsToggled = viewModel::setSensitiveNotificationsEnabled,
+        onRestartTour = onRestartTour,
         modifier = modifier,
     )
 }
@@ -208,6 +219,9 @@ private fun NotificationReviewScreen(
     onSetUserCategory: (Long, String?) -> Unit,
     dailySummaryEnabled: Boolean,
     onDailySummaryToggled: (Boolean) -> Unit,
+    sensitiveNotificationsEnabled: Boolean,
+    onSensitiveNotificationsToggled: (Boolean) -> Unit,
+    onRestartTour: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showSettingsMenu by remember { mutableStateOf(false) }
@@ -244,8 +258,21 @@ private fun NotificationReviewScreen(
                         DropdownMenu(
                             expanded = showSettingsMenu,
                             onDismissRequest = { showSettingsMenu = false },
+                            shape = RoundedCornerShape(20.dp),
                         ) {
+                            // Google-style menu: each item is an inset, rounded, green-tinted
+                            // pill. The gaps between pills separate them (no divider lines), and
+                            // the rounded clip also shapes the press ripple.
+                            val itemBackground = ZigGreen.copy(alpha = 0.08f)
+                            val itemModifier = Modifier
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(itemBackground)
+                            val itemPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
+
                             DropdownMenuItem(
+                                modifier = itemModifier,
+                                contentPadding = itemPadding,
                                 text = {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -269,6 +296,48 @@ private fun NotificationReviewScreen(
                                     }
                                 },
                                 onClick = { onDailySummaryToggled(!dailySummaryEnabled) },
+                            )
+                            DropdownMenuItem(
+                                modifier = itemModifier,
+                                contentPadding = itemPadding,
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Sensitive notifications",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                            Text(
+                                                text = "Show instantly on lock screen (skip filtering)",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                        Switch(
+                                            checked = sensitiveNotificationsEnabled,
+                                            onCheckedChange = onSensitiveNotificationsToggled,
+                                        )
+                                    }
+                                },
+                                onClick = { onSensitiveNotificationsToggled(!sensitiveNotificationsEnabled) },
+                            )
+                            DropdownMenuItem(
+                                modifier = itemModifier,
+                                contentPadding = itemPadding,
+                                text = { Text("Replay tour") },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    showSettingsMenu = false
+                                    onRestartTour()
+                                },
                             )
                         }
                     }
