@@ -53,10 +53,13 @@ onNotificationPosted()
   │   Only apps you explicitly opt in to are processed.
   │   Everything else passes through ZiG untouched.
   │
-  ├─ Sensitive-sender bypass ─────────────────────────────── publish immediately
-  │   If the sending app marked the notification private
-  │   (VISIBILITY_PRIVATE) and the screen is locked, ZiG
-  │   forwards it as-is and never inspects the redacted text.
+  ├─ Sensitive-while-locked handler ──────────────────────── depends on setting
+  │   A notification the sender marked private (VISIBILITY_PRIVATE)
+  │   arriving while the phone is locked. The "Sensitive
+  │   notifications" setting decides:
+  │     • ON  (default) → shown immediately, unfiltered.
+  │     • OFF           → held silently, then re-fetched with full
+  │                        content and classified the moment you unlock.
   │
   ├─ Layer 2 · Contact whitelist (Rust / JNI) ────────────── sender is a contact → publish
   │   The sender is matched against your contacts, kept in
@@ -96,6 +99,8 @@ If embedding is unavailable or Personal Memory is too sparse to be confident, th
 - **Managed Apps** — a searchable list of installed apps; tap to choose exactly which apps ZiG intercepts. Unmanaged apps are never touched.
 - **Custom Rules** — keyword rules that bypass the ML ensemble entirely. Rules support AND-chained conditions (a `"cab, arriving"` rule matches only when both words appear) and can be edited in place.
 - **Daily Summary** — an optional once-a-day digest of what was filtered, scheduled via WorkManager and delivered as a local notification.
+- **Sensitive notifications** *(setting, default on)* — governs how sender-private (`VISIBILITY_PRIVATE`) notifications that arrive while the phone is **locked** are treated. **On**, they're shown immediately (some users never want to miss a sensitive alert). **Off**, they're held silently and classified on unlock — because many spam SMS carry the same sensitivity flag, and the lock screen only exposes redacted "sensitive content" text, ZiG waits until unlock, **re-fetches the full content**, and runs it through the normal pipeline so genuine ones surface and spam is suppressed.
+- **Replay tour** — the guided onboarding tour can be re-run any time from the Settings menu.
 - **Pipeline Log** *(developer surface)* — a full per-notification trace of every pipeline stage and the reason behind each verdict, used for debugging. Hidden from the standard navigation.
 
 ---
