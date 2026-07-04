@@ -2,10 +2,15 @@ package dev.zig.notificationfilter.service
 
 import android.app.KeyguardManager
 import android.app.Notification
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 // import android.content.pm.PackageManager  // Phase 1: unused — restored if needed in future lanes
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.NativeBridge
@@ -13,6 +18,7 @@ import dev.zig.notificationfilter.data.local.db.NotificationLogDao
 import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.NotificationPublisher
 import dev.zig.notificationfilter.domain.classifier.DecisionSource
 import dev.zig.notificationfilter.domain.classifier.EnsembleClassifier
@@ -42,15 +48,47 @@ class ZigNotificationListenerService : NotificationListenerService() {
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     @Inject lateinit var ensembleClassifier: EnsembleClassifier
     @Inject lateinit var notificationPublisher: NotificationPublisher
+    @Inject lateinit var preferences: ZigUserPreferences
+
+    // Keys of notifications marked sensitive (VISIBILITY_PRIVATE) that arrived while the device
+    // was locked. Android delivers redacted text to listeners on the lock screen, so we cannot
+    // classify them then; we record their keys and re-fetch the full content once the user
+    // unlocks (see [unlockReceiver] / [processDeferredOnUnlock]). Guarded by synchronized(this).
+    private val deferredKeys = LinkedHashSet<String>()
+
+    // Cap so a device left locked for a long time can't accumulate an unbounded backlog.
+    private val maxDeferred = 100
+
+    // Fires on device unlock (ACTION_USER_PRESENT); triggers re-classification of deferred keys.
+    private val unlockReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                processDeferredOnUnlock()
+            }
+        }
+    }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
+        // ACTION_USER_PRESENT is a protected system broadcast and cannot be received via the
+        // manifest on API 26+, so it is registered at runtime for the listener's lifetime.
+        ContextCompat.registerReceiver(
+            this,
+            unlockReceiver,
+            IntentFilter(Intent.ACTION_USER_PRESENT),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         instance = null
+        try {
+            unregisterReceiver(unlockReceiver)
+        } catch (_: IllegalArgumentException) {
+            // Receiver was never registered (connect failed) — nothing to unregister.
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -62,6 +100,27 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         // TODO: Forward to removal pipeline
+    }
+
+    // Re-classifies notifications that were deferred while the device was locked. Invoked on
+    // unlock via [unlockReceiver]. Drains the recorded keys, re-fetches their current (now
+    // un-redacted) content via getActiveNotifications, and runs each back through the pipeline;
+    // since the device is unlocked, the deferral branch is skipped and they flow through
+    // contacts → keywords → the model, which publishes the genuine ones and suppresses spam.
+    private fun processDeferredOnUnlock() {
+        val keys = synchronized(deferredKeys) {
+            if (deferredKeys.isEmpty()) return
+            deferredKeys.toTypedArray().also { deferredKeys.clear() }
+        }
+        appScope.launch {
+            val active = try {
+                getActiveNotifications(keys)
+            } catch (_: Exception) {
+                // Listener not connected or a transient failure — nothing to process.
+                null
+            } ?: return@launch
+            active.forEach { evaluateNotification(it) }
+        }
     }
 
     private suspend fun evaluateNotification(sbn: StatusBarNotification) {
@@ -104,18 +163,36 @@ class ZigNotificationListenerService : NotificationListenerService() {
         }
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
 
-        // Locked-screen bypass: VISIBILITY_PRIVATE notifications carry content the user
-        // explicitly marked secret. When the keyguard is active, Android may redact the
-        // text fields, making classifier evaluation meaningless and potentially leaking intent.
-        // Treat these as automatic VIPs: publish immediately and record LOCKED_PASS.
+        // Locked screen + sender-marked-sensitive (VISIBILITY_PRIVATE). Behaviour is governed
+        // by the user's "Sensitive notifications" setting:
+        //
+        //  • ON (default) — VIP hall-pass: show it immediately without filtering. (Some users
+        //    prefer never to miss a sensitive alert on the lock screen.)
+        //
+        //  • OFF — defer: Android delivers redacted text ("sensitive content" placeholder) to
+        //    listeners while locked, so classifying now is meaningless. Record the key, publish
+        //    nothing (no disturbance), and re-fetch the full content to classify on unlock
+        //    (see processDeferredOnUnlock).
         if (keyguardManager.isKeyguardLocked &&
             sbn.notification?.visibility == Notification.VISIBILITY_PRIVATE) {
-            log(jobId, packageName, title, content, "LOCKED_PASS",
-                "Device locked + VISIBILITY_PRIVATE — bypassing ML pipeline")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
-            log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via locked-screen bypass")
-            review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS")
+            if (preferences.sensitiveNotificationsEnabled) {
+                log(jobId, packageName, title, content, "LOCKED_PASS",
+                    "Device locked + VISIBILITY_PRIVATE — sensitive notifications enabled, bypassing filter")
+                notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
+                log(jobId, packageName, title, content, "PUBLISHED",
+                    "Forwarded to user via locked-screen bypass")
+                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS")
+            } else {
+                synchronized(deferredKeys) {
+                    deferredKeys.add(originalKey)
+                    // Bound the backlog: drop the oldest once we exceed the cap.
+                    if (deferredKeys.size > maxDeferred) {
+                        deferredKeys.remove(deferredKeys.first())
+                    }
+                }
+                log(jobId, packageName, title, content, "LOCKED_DEFERRED",
+                    "Device locked + VISIBILITY_PRIVATE — deferred until unlock for classification")
+            }
             return
         }
 

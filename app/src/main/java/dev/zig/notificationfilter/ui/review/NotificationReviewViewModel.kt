@@ -93,6 +93,14 @@ class NotificationReviewViewModel @Inject constructor(
         if (enabled) dailySummaryScheduler.schedule() else dailySummaryScheduler.cancel()
     }
 
+    private val _sensitiveNotificationsEnabled = MutableStateFlow(preferences.sensitiveNotificationsEnabled)
+    val sensitiveNotificationsEnabled: StateFlow<Boolean> = _sensitiveNotificationsEnabled.asStateFlow()
+
+    fun setSensitiveNotificationsEnabled(enabled: Boolean) {
+        preferences.sensitiveNotificationsEnabled = enabled
+        _sensitiveNotificationsEnabled.value = enabled
+    }
+
     // ── Filter state ──────────────────────────────────────────────────────────
 
     private val _filter = MutableStateFlow(ReviewFilter())

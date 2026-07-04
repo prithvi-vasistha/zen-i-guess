@@ -36,10 +36,18 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_DEMO_SEEDED, false)
         set(value) = prefs.edit().putBoolean(KEY_DEMO_SEEDED, value).apply()
 
+    // When true (default), a notification the sender marked sensitive (VISIBILITY_PRIVATE)
+    // that arrives while the device is locked is shown immediately, bypassing the filter.
+    // When false, it is not shown while locked — it is deferred and classified on unlock.
+    var sensitiveNotificationsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SENSITIVE_NOTIFICATIONS, true)
+        set(value) = prefs.edit().putBoolean(KEY_SENSITIVE_NOTIFICATIONS, value).apply()
+
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
         const val KEY_TERMS_ACCEPTED = "terms_accepted"
         const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         const val KEY_DEMO_SEEDED = "demo_seeded"
+        const val KEY_SENSITIVE_NOTIFICATIONS = "sensitive_notifications_enabled"
     }
 }
