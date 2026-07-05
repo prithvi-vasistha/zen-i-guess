@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.data.local.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -10,6 +11,7 @@ import androidx.room.PrimaryKey
         Index(value = ["jobId"]),
         Index(value = ["packageName"]),
         Index(value = ["timestamp"]),
+        Index(value = ["messageText"]),
     ],
 )
 data class NotificationReviewEntity(
@@ -49,4 +51,11 @@ data class NotificationReviewEntity(
     // intentional and safe — the review UI maps entities to a separate UI model that
     // never carries the embedding, so structural equality is never relied upon here.
     val embedding: FloatArray? = null,
+    // ── Exact-match cache (added in MIGRATION_7_8) ────────────────────────────
+    // Pre-formatted classifier input: listOf(title, content).filter { it.isNotBlank() }
+    // .joinToString(" "). Stored with NOCASE collation so the B-Tree index is used by
+    // the plain-equality query in NotificationReviewDao.getExactMatchOverride().
+    // Empty string for every row inserted before v8 — they never match.
+    @ColumnInfo(collate = ColumnInfo.NOCASE)
+    val messageText: String = "",
 )

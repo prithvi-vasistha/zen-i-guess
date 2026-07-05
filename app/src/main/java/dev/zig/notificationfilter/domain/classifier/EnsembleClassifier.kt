@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.domain.classifier
 
+import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.domain.embedding.TextEmbedder
 import dev.zig.notificationfilter.domain.memory.Neighbor
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
@@ -29,6 +30,7 @@ class EnsembleClassifier @Inject constructor(
     private val embedder: TextEmbedder,
     private val memory: PersonalMemory,
     private val searchEngine: VectorSearchEngine,
+    private val reviewDao: NotificationReviewDao,
 ) {
 
     companion object {
@@ -50,6 +52,23 @@ class EnsembleClassifier @Inject constructor(
         packageName: String,
         text: String,
     ): EnsembleResult {
+        // ── Layer 0: Exact-match cache ─────────────────────────────────────────
+        // If the user has previously overridden this exact text, replay that decision
+        // immediately. No embedding, no TFLite, no KNN — zero battery spend.
+        val exactMatch = reviewDao.getExactMatchOverride(text)
+        if (exactMatch != null) {
+            val allowed = exactMatch.userOverrideStatus == "MANUALLY_ALLOWED"
+            return EnsembleResult(
+                allowed = allowed,
+                source = DecisionSource.EXACT_MATCH_OVERRIDE,
+                baseConfidence = 0f,
+                category = category,
+                topSimilarity = 1f,
+                consensusShare = 1f,
+                neighborCount = 1,
+            )
+        }
+
         val base = baseEngine.evaluate(category, packageName, text)
 
         // Fail open to the base model when we cannot embed (blank text, embedder unavailable).

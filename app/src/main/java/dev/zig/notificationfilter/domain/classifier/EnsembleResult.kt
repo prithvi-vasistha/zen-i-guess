@@ -7,6 +7,9 @@ enum class DecisionSource {
 
     /** Personal Memory reached a confident consensus and overrode the base model. */
     PERSONAL_MEMORY,
+
+    /** Exact-match cache: the user previously overrode this identical text — replayed instantly. */
+    EXACT_MATCH_OVERRIDE,
 }
 
 /**

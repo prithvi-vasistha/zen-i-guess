@@ -122,4 +122,18 @@ interface NotificationReviewDao {
     // Called after the WorkManager successfully appends a batch to the training CSV.
     @Query("UPDATE notification_review SET syncStatus = 'EXPORTED' WHERE id IN (:ids)")
     suspend fun markAsExported(ids: List<Long>)
+
+    // ── Exact-match cache ──────────────────────────────────────────────────────
+    // Looks up the most recent row the user explicitly overrode (MANUALLY_ALLOWED or
+    // MANUALLY_BLOCKED) whose messageText equals :text. The NOCASE collation on the
+    // column makes this query case-insensitive while still using the B-Tree index —
+    // no LOWER() needed.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE messageText = :text
+        AND userOverrideStatus != 'NONE'
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """)
+    suspend fun getExactMatchOverride(text: String): NotificationReviewEntity?
 }

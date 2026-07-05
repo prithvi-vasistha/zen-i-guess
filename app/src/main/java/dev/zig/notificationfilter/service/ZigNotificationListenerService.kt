@@ -145,6 +145,9 @@ class ZigNotificationListenerService : NotificationListenerService() {
         val title = resolveTitle(sbn)
         val content = resolveContent(sbn.notification)
         if (title.isBlank() && content.isBlank()) return
+        // Pre-format the classifier input once here so it is available to every gate,
+        // to the review() helper, and to the exact-match cache check in the ensemble.
+        val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
         // ──────────────────────────────────────────────────────────────────────
 
         val jobId = UUID.randomUUID().toString().take(8)
@@ -181,7 +184,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
                 log(jobId, packageName, title, content, "PUBLISHED",
                     "Forwarded to user via locked-screen bypass")
-                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS")
+                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS", messageText = text)
             } else {
                 synchronized(deferredKeys) {
                     deferredKeys.add(originalKey)
@@ -204,7 +207,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
-            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS")
+            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS", messageText = text)
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -217,7 +220,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
-            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS")
+            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS", messageText = text)
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -234,10 +237,9 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // ──────────────────────────────────────────────────────────────────────
 
         // Classifier lane: the RAC ensemble evaluates notifications that passed all
-        // deterministic gates — the base TFLite model (Base Instinct) plus a KNN search
-        // over the user's Personal Memory of past overrides. Fails open (allows) if the
-        // model is not yet installed, logging MODEL_ERROR so it is visible in the Logs tab.
-        val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
+        // deterministic gates — exact-match cache → base TFLite model (Base Instinct) →
+        // KNN over Personal Memory. Fails open (allows) if the model is not yet installed,
+        // logging MODEL_ERROR so it is visible in the Logs tab.
         val category = NotificationCategory.resolve(packageName, text)
 
         log(jobId, packageName, title, content, "MODEL_INVOKED",
@@ -263,17 +265,25 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         val inferredCategory = "CATEGORY_${result.category.name}"
 
-        // Provenance: surface when Personal Memory overrode the base model so the Logs
-        // tab makes the decision source explicit for debugging.
-        if (result.source == DecisionSource.PERSONAL_MEMORY) {
-            val verdict = if (result.allowed) "ALLOW" else "BLOCK"
-            log(jobId, packageName, title, content, "MEMORY_OVERRIDE_$verdict",
-                "Personal Memory vetoed base model → $verdict " +
-                    "(topSim=${result.topSimilarity}, consensus=${result.consensusShare}, " +
-                    "neighbors=${result.neighborCount})")
+        // Provenance logs: surface the decision source explicitly for the Logs tab.
+        when (result.source) {
+            DecisionSource.EXACT_MATCH_OVERRIDE -> {
+                val verdict = if (result.allowed) "ALLOW" else "BLOCK"
+                log(jobId, packageName, title, content, "EXACT_MATCH_$verdict",
+                    "Exact-match cache hit — replaying past manual decision → $verdict (no ML invoked)")
+            }
+            DecisionSource.PERSONAL_MEMORY -> {
+                val verdict = if (result.allowed) "ALLOW" else "BLOCK"
+                log(jobId, packageName, title, content, "MEMORY_OVERRIDE_$verdict",
+                    "Personal Memory vetoed base model → $verdict " +
+                        "(topSim=${result.topSimilarity}, consensus=${result.consensusShare}, " +
+                        "neighbors=${result.neighborCount})")
+            }
+            DecisionSource.BASE_MODEL -> Unit
         }
 
         val decidedBy = when (result.source) {
+            DecisionSource.EXACT_MATCH_OVERRIDE -> "exact-match cache"
             DecisionSource.PERSONAL_MEMORY -> "Personal Memory"
             DecisionSource.BASE_MODEL -> "base classifier"
         }
@@ -285,12 +295,12 @@ class ZigNotificationListenerService : NotificationListenerService() {
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via $decidedBy")
             review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED",
-                result.baseConfidence, inferredCategory)
+                result.baseConfidence, inferredCategory, text)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
                 "Blocked by $decidedBy (base score ${result.baseConfidence}) — suppressed")
             review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
-                result.baseConfidence, inferredCategory)
+                result.baseConfidence, inferredCategory, text)
         }
     }
 
@@ -349,6 +359,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         systemDecision: String,
         modelConfidence: Float = 0f,
         inferredCategory: String = "UNKNOWN",
+        messageText: String = "",
     ) {
         reviewDao.insert(
             NotificationReviewEntity(
@@ -360,6 +371,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 systemDecision = systemDecision,
                 modelConfidence = modelConfidence,
                 inferredCategory = inferredCategory,
+                messageText = messageText,
             ),
         )
     }

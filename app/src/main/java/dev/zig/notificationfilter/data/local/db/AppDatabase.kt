@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationReviewEntity::class,
         AppCategoryOverrideEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(StringListConverter::class, ReviewEnumConverters::class, FloatArrayConverter::class)
@@ -131,6 +131,23 @@ abstract class AppDatabase : RoomDatabase() {
                 // and an embedding is computed.
                 db.execSQL(
                     "ALTER TABLE `notification_review` ADD COLUMN `embedding` BLOB"
+                )
+            }
+        }
+
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Exact-match cache: stores the pre-formatted classifier input text
+                // (title + " " + content) with NOCASE collation so the B-Tree index
+                // is used by plain equality queries. Existing rows receive "" — they
+                // will never match and the cache builds up transparently going forward.
+                db.execSQL(
+                    "ALTER TABLE `notification_review` " +
+                        "ADD COLUMN `messageText` TEXT NOT NULL DEFAULT '' COLLATE NOCASE"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_notification_review_messageText` " +
+                        "ON `notification_review` (`messageText`)"
                 )
             }
         }
