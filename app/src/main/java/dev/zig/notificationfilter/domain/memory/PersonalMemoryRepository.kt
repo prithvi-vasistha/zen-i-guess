@@ -53,6 +53,10 @@ class PersonalMemoryRepository @Inject constructor(
         invalidate()
     }
 
+    override suspend fun reload() {
+        invalidate()
+    }
+
     private fun invalidate() {
         cache = null
     }

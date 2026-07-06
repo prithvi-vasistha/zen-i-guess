@@ -144,4 +144,25 @@ interface NotificationReviewDao {
         LIMIT 1
     """)
     suspend fun getExactMatchOverride(text: String): NotificationReviewEntity?
+
+    // ── Backup / Restore ───────────────────────────────────────────────────────
+
+    // Every row the user has explicitly overridden — the exportable RAC corpus.
+    // Mirrors the personal-memory / exact-match selection (userOverrideStatus != 'NONE')
+    // but ignores whether an embedding exists, since the backup carries text only.
+    @Query("SELECT * FROM notification_review WHERE userOverrideStatus != 'NONE'")
+    suspend fun getAllOverrides(): List<NotificationReviewEntity>
+
+    // Bulk-inserts restored overrides and returns the newly-assigned row ids (in input
+    // order) so the caller can attach a re-computed embedding to each. REPLACE keeps the
+    // insert robust, though the manager assigns id = 0 (auto) and clears prior RESTORED rows
+    // first, so in practice this only ever adds fresh rows and never clobbers real ones by id.
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long>
+
+    // Clears previously-restored rows so re-importing the same backup is idempotent
+    // (no duplicate memory entries). RESTORED is a synthetic systemDecision used only by
+    // the restore path — real notifications never carry it, so this cannot touch history.
+    @Query("DELETE FROM notification_review WHERE systemDecision = 'RESTORED'")
+    suspend fun deleteRestored()
 }

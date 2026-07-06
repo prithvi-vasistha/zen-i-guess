@@ -21,4 +21,11 @@ interface PersonalMemory {
 
     /** Drops review row [id] from the corpus (e.g. on undo) by clearing its embedding. */
     suspend fun forgetOverride(id: Long)
+
+    /**
+     * Invalidates the cached corpus so the next [corpus] call re-reads from the database.
+     * Called after a bulk change the per-row hooks don't cover — e.g. a backup restore that
+     * writes many override rows and their embeddings directly.
+     */
+    suspend fun reload()
 }
