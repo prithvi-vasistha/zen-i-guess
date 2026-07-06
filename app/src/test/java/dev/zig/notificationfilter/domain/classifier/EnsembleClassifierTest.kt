@@ -1,9 +1,13 @@
 package dev.zig.notificationfilter.domain.classifier
 
+import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
+import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.domain.embedding.TextEmbedder
 import dev.zig.notificationfilter.domain.memory.MemoryVector
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
 import dev.zig.notificationfilter.domain.memory.VectorSearchEngine
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -29,6 +33,32 @@ class EnsembleClassifierTest {
         override suspend fun corpus(): List<MemoryVector> = vectors
         override suspend fun rememberOverride(id: Long) = Unit
         override suspend fun forgetOverride(id: Long) = Unit
+        override suspend fun reload() = Unit
+    }
+
+    // Exact-match layer is not under test here — every lookup misses so the ensemble falls
+    // through to the base + memory logic these tests exercise.
+    private class FakeReviewDao : NotificationReviewDao {
+        override suspend fun insert(entity: NotificationReviewEntity) = Unit
+        override fun getFilteredNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>> = emptyFlow()
+        override fun getPendingReviewFlow(): Flow<List<NotificationReviewEntity>> = emptyFlow()
+        override suspend fun updateReviewState(id: Long, state: String) = Unit
+        override suspend fun setReviewStateOnly(id: Long, state: String) = Unit
+        override suspend fun updateOverrideStatus(id: Long, status: String) = Unit
+        override suspend fun updateUserAssignedCategory(id: Long, category: String?) = Unit
+        override suspend fun getById(id: Long): NotificationReviewEntity? = null
+        override suspend fun updateEmbedding(id: Long, embedding: FloatArray?) = Unit
+        override suspend fun getPersonalMemory(): List<NotificationReviewEntity> = emptyList()
+        override fun getArchivedNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>> = emptyFlow()
+        override fun searchActiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>> = emptyFlow()
+        override fun searchArchiveFlow(archiveCutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>> = emptyFlow()
+        override suspend fun countReviewableToday(startOfDayMs: Long): Int = 0
+        override suspend fun getUnprocessedReviews(): List<NotificationReviewEntity> = emptyList()
+        override suspend fun markAsExported(ids: List<Long>) = Unit
+        override suspend fun getExactMatchOverride(text: String): NotificationReviewEntity? = null
+        override suspend fun getAllOverrides(): List<NotificationReviewEntity> = emptyList()
+        override suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long> = emptyList()
+        override suspend fun deleteRestored() = Unit
     }
 
     private fun ensemble(
@@ -41,6 +71,7 @@ class EnsembleClassifierTest {
         embedder = FakeEmbedder(query),
         memory = FakeMemory(corpus),
         searchEngine = VectorSearchEngine(),
+        reviewDao = FakeReviewDao(),
     )
 
     private fun evaluate(classifier: EnsembleClassifier) = runBlocking {
