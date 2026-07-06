@@ -40,6 +40,12 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_DEFAULT_RULES_SEEDED, false)
         set(value) = prefs.edit().putBoolean(KEY_DEFAULT_RULES_SEEDED, value).apply()
 
+    // The "Set app to Silent" setup card on the Managed Apps screen is dismissable.
+    // Once dismissed it stays dismissed across launches.
+    var setupBannerDismissed: Boolean
+        get() = prefs.getBoolean(KEY_SETUP_BANNER_DISMISSED, false)
+        set(value) = prefs.edit().putBoolean(KEY_SETUP_BANNER_DISMISSED, value).apply()
+
     // When true (default), a notification the sender marked sensitive (VISIBILITY_PRIVATE)
     // that arrives while the device is locked is shown immediately, bypassing the filter.
     // When false, it is not shown while locked — it is deferred and classified on unlock.
@@ -53,6 +59,7 @@ class ZigUserPreferences @Inject constructor(
         const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         const val KEY_DEMO_SEEDED = "demo_seeded"
         const val KEY_DEFAULT_RULES_SEEDED = "default_rules_seeded"
+        const val KEY_SETUP_BANNER_DISMISSED = "setup_banner_dismissed"
         const val KEY_SENSITIVE_NOTIFICATIONS = "sensitive_notifications_enabled"
     }
 }

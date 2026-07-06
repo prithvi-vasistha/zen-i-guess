@@ -15,10 +15,12 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppEntity
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -29,6 +31,7 @@ import javax.inject.Inject
 class ManagedAppsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val managedAppDao: ManagedAppDao,
+    private val preferences: ZigUserPreferences,
 ) : ViewModel() {
 
     data class InstalledApp(
@@ -83,6 +86,16 @@ class ManagedAppsViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = UiState(isLoading = true),
     )
+
+    // Setup-banner visibility, seeded from the persisted dismissal flag. Dismissing hides it
+    // for this session and every future launch.
+    private val _setupBannerVisible = MutableStateFlow(!preferences.setupBannerDismissed)
+    val setupBannerVisible: StateFlow<Boolean> = _setupBannerVisible.asStateFlow()
+
+    fun dismissSetupBanner() {
+        preferences.setupBannerDismissed = true
+        _setupBannerVisible.value = false
+    }
 
     init {
         loadInstalledApps()

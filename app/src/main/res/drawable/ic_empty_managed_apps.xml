@@ -1,0 +1,64 @@
+<!--
+  Empty-state doodle for the Managed Apps screen: three app tiles, the last one an
+  empty "add" slot, sitting on a soft shadow with a couple of sparkles. Line-art in
+  ZigGreen so it reads as a friendly, on-brand illustration rather than a photo.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="150dp"
+    android:height="122dp"
+    android:viewportWidth="128"
+    android:viewportHeight="104">
+
+    <!-- Soft ground shadow under the tiles. -->
+    <path
+        android:fillColor="#FFEEEEEE"
+        android:pathData="M20,86 a44,5 0 1 0 88,0 a44,5 0 1 0 -88,0 z" />
+
+    <!-- Tile A (filled app). -->
+    <path
+        android:fillColor="#FFC8E6C9"
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:pathData="M20,46 h16 a6,6 0 0 1 6,6 v16 a6,6 0 0 1 -6,6 h-16 a6,6 0 0 1 -6,-6 v-16 a6,6 0 0 1 6,-6 z" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M22,58 h12 M22,64 h8" />
+
+    <!-- Tile B (filled app). -->
+    <path
+        android:fillColor="#FFC8E6C9"
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:pathData="M56,46 h16 a6,6 0 0 1 6,6 v16 a6,6 0 0 1 -6,6 h-16 a6,6 0 0 1 -6,-6 v-16 a6,6 0 0 1 6,-6 z" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M58,58 h12 M58,64 h8" />
+
+    <!-- Tile C (empty "add" slot). -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:pathData="M92,46 h16 a6,6 0 0 1 6,6 v16 a6,6 0 0 1 -6,6 h-16 a6,6 0 0 1 -6,-6 v-16 a6,6 0 0 1 6,-6 z" />
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M100,54 v12 M94,60 h12" />
+
+    <!-- Sparkles. -->
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M30,24 v8 M26,28 h8" />
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M99,28 v6 M96,31 h6" />
+</vector>
