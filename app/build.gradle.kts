@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -77,6 +78,11 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation("androidx.compose.material:material-icons-core") // BOM-managed; ~200 KB; bell, chevron, menu icons
     implementation(libs.hilt.navigation.compose)
+
+    // Backup & Restore payload (de)serialization. kotlinx.serialization is compile-time
+    // codegen (no reflection — honours the project's no-reflection rule) and JetBrains
+    // first-party, versioned with the Kotlin plugin already in use. ~a few hundred KB.
+    implementation(libs.kotlinx.serialization.json)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
