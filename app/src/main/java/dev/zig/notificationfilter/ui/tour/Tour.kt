@@ -28,7 +28,7 @@ object TourKeys {
     const val NAV_RULES = "nav_rules"
     const val NAV_LOGS = "nav_logs"
 
-    const val APPS_MANAGE_SWITCH = "apps_manage_switch"
+    const val APPS_ADD_FAB = "apps_add_fab"
     const val REVIEW_ARCHIVE = "review_archive"
     const val REVIEW_CATEGORY = "review_category"
     const val REVIEW_SETTINGS = "review_settings"
@@ -60,77 +60,40 @@ private val TAB_RULES = ZigScreen.all.indexOf(ZigScreen.Rules)
 // Developer-only Logs tab — re-add `Logs` to ZigScreen.all first, then uncomment this and its step.
 // private val TAB_LOGS = ZigScreen.all.indexOf(ZigScreen.Logs)
 
-/** The scripted walkthrough: navigate to a tab, then explain the screen and one control. */
+/**
+ * The scripted walkthrough: navigate to a tab, spotlight one control, explain it. Kept to
+ * four teaching steps plus a closing card — add apps, assign category, archive, rules vault.
+ */
 val TOUR_STEPS: List<TourStep> = listOf(
     TourStep(
         tab = TAB_APPS,
-        targetKey = null,
-        title = "Welcome to ZiG",
-        body = "A quick tour of the four screens. You can skip it anytime.",
-    ),
-    TourStep(
-        tab = TAB_APPS,
-        targetKey = TourKeys.TITLE_APPS,
-        title = "Apps",
-        body = "Choose which apps ZiG manages. Apps you don't select pass through completely untouched.",
-    ),
-    TourStep(
-        tab = TAB_APPS,
-        targetKey = TourKeys.APPS_MANAGE_SWITCH,
-        title = "Turn on an app",
-        body = "Flip a switch to let ZiG intercept and filter that app's notifications.",
-    ),
-    TourStep(
-        tab = TAB_REVIEW,
-        targetKey = TourKeys.TITLE_REVIEW,
-        title = "Notifications",
-        body = "The last 24 hours of alerts ZiG processed. Allow or Block each one — your choices train ZiG to your preferences. We've added two sample notifications so you can try it.",
+        targetKey = TourKeys.APPS_ADD_FAB,
+        title = "Add apps",
+        body = "Tap ＋ to pick which apps ZiG manages. Choose an app, confirm, and ZiG starts filtering its notifications. Apps you don't add pass through untouched.",
     ),
     TourStep(
         tab = TAB_REVIEW,
         targetKey = TourKeys.REVIEW_CATEGORY,
-        title = "Category",
-        body = "The on-device model tags each notification with a category and shows it here. Tap the chip to correct it — ZiG learns from your choice.",
+        title = "Sort by category",
+        body = "ZiG tags every notification with a category. Tap an app's chip to set a default for everything it sends, or a single notification's chip to fix just that one — ZiG learns from each change.",
     ),
     TourStep(
         tab = TAB_REVIEW,
         targetKey = TourKeys.REVIEW_ARCHIVE,
         title = "Archive",
-        body = "Open a 30-day history here to find and fix anything you mislabelled more than a day ago.",
-    ),
-    TourStep(
-        tab = TAB_REVIEW,
-        targetKey = TourKeys.REVIEW_SETTINGS,
-        title = "Settings",
-        body = "Configure ZiG here — like the daily 8 PM recap of everything it filtered for you.",
-    ),
-    TourStep(
-        tab = TAB_RULES,
-        targetKey = TourKeys.TITLE_RULES,
-        title = "Rules",
-        body = "Keyword rules that bypass the AI entirely for time-sensitive alerts.",
+        body = "Switch to a 30-day history to find and re-label anything you missed more than a day ago.",
     ),
     TourStep(
         tab = TAB_RULES,
         targetKey = TourKeys.RULES_INPUT,
-        title = "Never miss an OTP",
-        body = "Add keywords like OTP or Verification. Matching notifications always pass instantly — before the model even runs.",
+        title = "Rules Vault",
+        body = "Add keywords like OTP or Verification here. Matching notifications skip the AI and always come through instantly.",
     ),
-    // Developer-only Logs step — commented out along with the Logs bottom-bar entry. To re-enable,
-    // uncomment TAB_LOGS above, re-add Logs to ZigScreen.all, then uncomment this step.
-    /*
-    TourStep(
-        tab = TAB_LOGS,
-        targetKey = TourKeys.NAV_LOGS,
-        title = "Logs",
-        body = "A full pipeline trace of every notification and exactly why it was allowed or blocked.",
-    ),
-    */
     TourStep(
         tab = TAB_APPS,
         targetKey = null,
-        title = "You're all set!",
-        body = "Head to the Apps screen to pick what ZiG should watch. You can revisit any screen from the bottom bar.",
+        title = "You're ready to go",
+        body = "That's it! Head to Apps to choose what ZiG should watch. You can revisit any screen from the bottom bar anytime.",
     ),
 )
 

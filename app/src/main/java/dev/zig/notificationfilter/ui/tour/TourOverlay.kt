@@ -25,6 +25,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,11 +50,12 @@ import kotlin.math.max
 
 private val SCRIM_COLOR = Color.Black.copy(alpha = 0.78f)
 
-// Step-transition timing — a deliberate, fluid change rather than an instant snap.
-private const val EXIT_FADE_MS = 220      // fade the current spotlight out before moving
-private const val SETTLE_MS = 420         // pause on the freshly-loaded page before revealing
-private const val SAME_PAGE_GAP_MS = 140  // brief beat between two targets on the same page
-private const val REVEAL_MS = 320         // eased fade of the spotlight and tooltip
+// Step-transition timing — snappy, in line with common product tours; quick enough to feel
+// responsive without an instant snap.
+private const val EXIT_FADE_MS = 120      // fade the current spotlight out before moving
+private const val SETTLE_MS = 180         // brief pause on the freshly-loaded page before revealing
+private const val SAME_PAGE_GAP_MS = 60   // beat between two targets on the same page
+private const val REVEAL_MS = 220         // eased fade of the spotlight and tooltip
 
 /**
  * Full-screen tour layer drawn above the real app. For each step it drives the pager
@@ -73,15 +75,18 @@ fun TourOverlay(
     val targetRect: Rect? = step.targetKey?.let { controller.registry.bounds[it] }
     val navRect: Rect? = controller.registry.bounds[TourKeys.NAV_BAR]
 
-    // Whether the current step's spotlight and tooltip should be shown. Turned off during a
-    // transition and back on once the destination page has settled (see the sequence below).
-    var armed by remember { mutableStateOf(false) }
+    // The step index whose spotlight and tooltip are allowed to show. Kept as an index rather
+    // than a boolean so that the instant controller.currentIndex advances, `armed` derives to
+    // false in the SAME recomposition — otherwise the incoming step (already reflected in
+    // `step`) would flash its card at the old position for a frame before the effect below
+    // runs. Nothing shows again until this effect explicitly re-arms the new index.
+    var armedIndex by remember { mutableIntStateOf(-1) }
+    val armed = armedIndex == controller.currentIndex
 
-    // A deliberate, fluid step change: fade the current spotlight out, animate to the step's
-    // page, give the user a beat to take the new screen in, then fade the new spotlight in.
-    // Only timing and opacity are animated here — nothing is ever repositioned.
+    // A fluid step change: the index bump has already hidden the outgoing card, so wait for its
+    // fade-out, animate to the step's page, give the user a beat to take it in, then arm this
+    // step to fade the new spotlight in. Only timing and opacity change — never position.
     LaunchedEffect(controller.currentIndex) {
-        armed = false                                    // fade the current spotlight out
         delay(EXIT_FADE_MS.toLong())
         if (pagerState.currentPage != step.tab) {
             pagerState.animateScrollToPage(step.tab)      // smooth page navigation
@@ -89,7 +94,7 @@ fun TourOverlay(
         } else {
             delay(SAME_PAGE_GAP_MS.toLong())              // brief beat between same-page targets
         }
-        armed = true                                     // fade the new spotlight in
+        armedIndex = controller.currentIndex             // fade the new spotlight in
     }
 
     // Eased fade for the spotlight and tooltip; reaches full only once the step is armed and
@@ -101,7 +106,7 @@ fun TourOverlay(
     )
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val padPx = with(LocalDensity.current) { 4.dp.toPx() }
+        val padPx = with(LocalDensity.current) { 2.dp.toPx() }
         val marginPx = with(LocalDensity.current) { 6.dp.toPx() }
         val maxW = constraints.maxWidth.toFloat()
         val maxH = constraints.maxHeight.toFloat()
@@ -178,33 +183,49 @@ fun TourOverlay(
         // animation so it doesn't flash at the wrong position — and fade it in with the
         // spotlight. Positioning is unchanged.
         if (armed) {
-            val sc = shownCutout
-            // Anchor the tooltip clear of the spotlight: below a top-half target, above a
-            // bottom-half one, centered when there's no target.
-            val alignment = when {
-                sc == null -> Alignment.Center
-                sc.center.y < maxH / 2f -> Alignment.BottomCenter
-                else -> Alignment.TopCenter
-            }
-            // Bottom-anchored tooltips must clear the always-visible nav bar so they never
-            // cover the bottom menus. Use the nav bar's real top edge; fall back to a safe
-            // inset before its bounds arrive.
             val density = LocalDensity.current
-            val bottomInset = navRect?.let { with(density) { (maxH - it.top).toDp() } + 12.dp } ?: 96.dp
-            val tooltipPadding = when (alignment) {
-                Alignment.BottomCenter -> Modifier.padding(bottom = bottomInset, start = 20.dp, end = 20.dp)
-                Alignment.TopCenter -> Modifier.padding(top = 56.dp, start = 20.dp, end = 20.dp)
-                else -> Modifier.padding(horizontal = 24.dp)
+            val sc = shownCutout
+
+            // The band the tooltip is centred within. It clears the status bar at the top and
+            // the always-visible nav bar at the bottom, then picks the larger open gap — above
+            // or below the target — so the card sits in free space instead of jammed against a
+            // screen edge. No target → centre in the whole band.
+            val topInsetPx = with(density) { 40.dp.toPx() }
+            val bottomLimitPx = (navRect?.top ?: (maxH - with(density) { 84.dp.toPx() })) -
+                with(density) { 12.dp.toPx() }
+
+            var regionTopPx = topInsetPx
+            var regionBottomPx = bottomLimitPx
+            if (sc != null) {
+                if ((bottomLimitPx - sc.bottom) >= (sc.top - topInsetPx)) {
+                    regionTopPx = sc.bottom.coerceIn(topInsetPx, bottomLimitPx)
+                } else {
+                    regionBottomPx = sc.top.coerceIn(topInsetPx, bottomLimitPx)
+                }
+            }
+            // If the chosen gap is too short to hold the card, fall back to the whole band.
+            if (regionBottomPx - regionTopPx < with(density) { 220.dp.toPx() }) {
+                regionTopPx = topInsetPx
+                regionBottomPx = bottomLimitPx
             }
 
-            TourTooltip(
-                controller = controller,
-                step = step,
+            Box(
                 modifier = Modifier
-                    .align(alignment)
-                    .alpha(reveal)
-                    .then(tooltipPadding),
-            )
+                    .fillMaxSize()
+                    .padding(
+                        top = with(density) { regionTopPx.toDp() },
+                        bottom = with(density) { (maxH - regionBottomPx).toDp() },
+                        start = 20.dp,
+                        end = 20.dp,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                TourTooltip(
+                    controller = controller,
+                    step = step,
+                    modifier = Modifier.alpha(reveal),
+                )
+            }
         }
     }
 }

@@ -46,7 +46,12 @@ fun MainScreen(
     onTourStarted: () -> Unit = {},
     onTourFinished: () -> Unit = {},
 ) {
-    val pagerState = rememberPagerState(pageCount = { ZigScreen.all.size })
+    val pagerState = rememberPagerState(
+        // Open the tour directly on its first step's tab (Apps) so it doesn't visibly slide
+        // over from the default Notifications page as the walkthrough begins.
+        initialPage = if (startTour) TOUR_STEPS.first().tab else 0,
+        pageCount = { ZigScreen.all.size },
+    )
     val coroutineScope = rememberCoroutineScope()
 
     // Coach-mark bounds registry; provided into the tree only while the tour runs so
