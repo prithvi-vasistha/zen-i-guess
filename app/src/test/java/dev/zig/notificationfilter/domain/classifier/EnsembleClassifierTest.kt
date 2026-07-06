@@ -36,9 +36,12 @@ class EnsembleClassifierTest {
         override suspend fun reload() = Unit
     }
 
-    // Exact-match layer is not under test here — every lookup misses so the ensemble falls
-    // through to the base + memory logic these tests exercise.
-    private class FakeReviewDao : NotificationReviewDao {
+    // getExactMatchOverride resolves against [overridesByKey] (key -> userOverrideStatus); every
+    // other method is inert. An empty map means the cache always misses, so the ensemble falls
+    // through to the base + memory logic the other tests exercise.
+    private class FakeReviewDao(
+        private val overridesByKey: Map<String, String> = emptyMap(),
+    ) : NotificationReviewDao {
         override suspend fun insert(entity: NotificationReviewEntity) = Unit
         override fun getFilteredNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override fun getPendingReviewFlow(): Flow<List<NotificationReviewEntity>> = emptyFlow()
@@ -55,10 +58,41 @@ class EnsembleClassifierTest {
         override suspend fun countReviewableToday(startOfDayMs: Long): Int = 0
         override suspend fun getUnprocessedReviews(): List<NotificationReviewEntity> = emptyList()
         override suspend fun markAsExported(ids: List<Long>) = Unit
-        override suspend fun getExactMatchOverride(text: String): NotificationReviewEntity? = null
+        override suspend fun getExactMatchOverride(text: String): NotificationReviewEntity? =
+            overridesByKey[text]?.let { status ->
+                NotificationReviewEntity(
+                    jobId = "test", packageName = "com.example.app", title = "", content = "",
+                    timestamp = 0L, systemDecision = "MODEL_BLOCKED",
+                    userOverrideStatus = status, messageText = text,
+                )
+            }
         override suspend fun getAllOverrides(): List<NotificationReviewEntity> = emptyList()
         override suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long> = emptyList()
         override suspend fun deleteRestored() = Unit
+    }
+
+    // Regression test for the messaging-app cache-key bug: the base model would ALLOW and the
+    // full conversation text has grown ("~ppv Hi\nHi"), but the stable per-message exactMatchKey
+    // ("~ppv Hi") matches a prior manual block, so the block is replayed without invoking the model.
+    @Test
+    fun `exact-match key replays a manual block even as the conversation grows`() {
+        val classifier = EnsembleClassifier(
+            baseEngine = FakeBaseEngine(allowed = true, confidence = 0.0f),
+            embedder = FakeEmbedder(null),
+            memory = FakeMemory(emptyList()),
+            searchEngine = VectorSearchEngine(),
+            reviewDao = FakeReviewDao(mapOf("~ppv Hi" to "MANUALLY_BLOCKED")),
+        )
+        val result = runBlocking {
+            classifier.evaluate(
+                category = NotificationCategory.UNKNOWN,
+                packageName = "com.example.app",
+                text = "~ppv Hi\nHi",
+                exactMatchKey = "~ppv Hi",
+            )
+        }
+        assertEquals(DecisionSource.EXACT_MATCH_OVERRIDE, result.source)
+        assertEquals(false, result.allowed)
     }
 
     private fun ensemble(

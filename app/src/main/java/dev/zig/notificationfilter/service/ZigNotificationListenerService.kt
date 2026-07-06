@@ -148,6 +148,13 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // Pre-format the classifier input once here so it is available to every gate,
         // to the review() helper, and to the exact-match cache check in the ensemble.
         val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
+        // Exact-match cache key. For a MessagingStyle notification `content` is the WHOLE
+        // conversation (all of EXTRA_MESSAGES joined), so it grows with every new message and
+        // would never match a previously-stored key. The key must instead be the single newest
+        // message — the one that actually triggered this notification — so a repeat of the same
+        // message reproduces the same key. For non-messaging notifications this equals `text`.
+        val latestMessage = resolveLatestMessage(sbn.notification)
+        val cacheKey = listOf(title, latestMessage).filter { it.isNotBlank() }.joinToString(" ")
         // ──────────────────────────────────────────────────────────────────────
 
         val jobId = UUID.randomUUID().toString().take(8)
@@ -184,7 +191,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
                 log(jobId, packageName, title, content, "PUBLISHED",
                     "Forwarded to user via locked-screen bypass")
-                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS", messageText = text)
+                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS", messageText = cacheKey)
             } else {
                 synchronized(deferredKeys) {
                     deferredKeys.add(originalKey)
@@ -207,7 +214,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
-            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS", messageText = text)
+            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS", messageText = cacheKey)
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -220,7 +227,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
-            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS", messageText = text)
+            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS", messageText = cacheKey)
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -246,7 +253,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             "Sending to on-device ensemble [$category]")
 
         val result = try {
-            ensembleClassifier.evaluate(category, packageName, text)
+            ensembleClassifier.evaluate(category, packageName, text, cacheKey)
         } catch (e: Exception) {
             log(jobId, packageName, title, content, "MODEL_ERROR",
                 "Inference failed: ${e.message} — failing open")
@@ -295,12 +302,12 @@ class ZigNotificationListenerService : NotificationListenerService() {
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via $decidedBy")
             review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED",
-                result.baseConfidence, inferredCategory, text)
+                result.baseConfidence, inferredCategory, cacheKey)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
                 "Blocked by $decidedBy (base score ${result.baseConfidence}) — suppressed")
             review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
-                result.baseConfidence, inferredCategory, text)
+                result.baseConfidence, inferredCategory, cacheKey)
         }
     }
 
@@ -318,6 +325,25 @@ class ZigNotificationListenerService : NotificationListenerService() {
             return messages
                 .mapNotNull { it.getCharSequence("text")?.toString()?.takeIf { msg -> msg.isNotBlank() } }
                 .joinToString("\n")
+        }
+        return extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+    }
+
+    // The single newest message — the one that triggered this notification. For a MessagingStyle
+    // notification that is the last entry of EXTRA_MESSAGES (chronological order); otherwise it is
+    // EXTRA_TEXT, identical to resolveContent. Used only as the exact-match cache key, which must
+    // stay stable as a conversation grows (resolveContent, by contrast, returns the whole thread
+    // for display and model context).
+    private fun resolveLatestMessage(notification: android.app.Notification?): String {
+        val extras = notification?.extras ?: return ""
+        @Suppress("DEPRECATION")
+        val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+            ?.filterIsInstance<Bundle>()
+        if (!messages.isNullOrEmpty()) {
+            val latest = messages
+                .mapNotNull { it.getCharSequence("text")?.toString()?.takeIf { msg -> msg.isNotBlank() } }
+                .lastOrNull()
+            if (latest != null) return latest
         }
         return extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
     }

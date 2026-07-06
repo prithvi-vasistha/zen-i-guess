@@ -51,11 +51,17 @@ class EnsembleClassifier @Inject constructor(
         category: NotificationCategory,
         packageName: String,
         text: String,
+        exactMatchKey: String = text,
     ): EnsembleResult {
         // ── Layer 0: Exact-match cache ─────────────────────────────────────────
-        // If the user has previously overridden this exact text, replay that decision
+        // If the user has previously overridden this exact message, replay that decision
         // immediately. No embedding, no TFLite, no KNN — zero battery spend.
-        val exactMatch = reviewDao.getExactMatchOverride(text)
+        //
+        // The lookup uses [exactMatchKey], not [text]: for a MessagingStyle notification [text]
+        // is the whole (growing) conversation, which would never reproduce a stored key, whereas
+        // [exactMatchKey] is the single newest message and stays stable across repeats. For
+        // non-messaging notifications the two are identical (the default).
+        val exactMatch = reviewDao.getExactMatchOverride(exactMatchKey)
         if (exactMatch != null) {
             val allowed = exactMatch.userOverrideStatus == "MANUALLY_ALLOWED"
             return EnsembleResult(
