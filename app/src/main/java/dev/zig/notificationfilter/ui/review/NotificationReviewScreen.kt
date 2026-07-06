@@ -53,8 +53,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -64,8 +68,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,8 +82,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.launch
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
-import dev.zig.notificationfilter.ui.common.BellDoodle
+import androidx.compose.ui.res.painterResource
+import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
@@ -151,10 +159,27 @@ fun NotificationReviewRoute(
     val isRefreshing by viewModel.isRefreshing.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         viewModel.refreshCompleted.collect {
             snackbarHostState.showSnackbar("Up to date")
+        }
+    }
+
+    // Swipe-to-dismiss on the inbox: soft-hide the row, then offer a one-tap Undo. The row
+    // stays in the archive regardless, so an accidental dismiss loses nothing permanent.
+    val onDismiss: (Long) -> Unit = { id ->
+        viewModel.onDismiss(id)
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = "Notification dismissed",
+                actionLabel = "Undo",
+                withDismissAction = true,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                viewModel.onRestoreDismissed(id)
+            }
         }
     }
 
@@ -181,6 +206,7 @@ fun NotificationReviewRoute(
         onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
         onSetCategoryOverride = viewModel::setCategoryOverride,
         onSetUserCategory = viewModel::setUserAssignedCategory,
+        onDismiss = onDismiss,
         modifier = modifier,
     )
 }
@@ -210,6 +236,7 @@ private fun NotificationReviewScreen(
     onBlockAndMuteClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
+    onDismiss: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
 
@@ -329,7 +356,12 @@ private fun NotificationReviewScreen(
                     is ReviewUiState.Empty -> {
                         ZigEmptyState(
                             title = if (showArchive) "Archive is empty" else "You're all caught up",
-                            doodle = { BellDoodle() },
+                            doodle = {
+                                Image(
+                                    painter = painterResource(R.drawable.ic_empty_notifications),
+                                    contentDescription = null,
+                                )
+                            },
                         )
                     }
                     is ReviewUiState.Content -> {
@@ -343,6 +375,7 @@ private fun NotificationReviewScreen(
                             onBlockAndMuteClicked = onBlockAndMuteClicked,
                             onSetCategoryOverride = onSetCategoryOverride,
                             onSetUserCategory = onSetUserCategory,
+                            onDismiss = onDismiss,
                         )
                     }
                     is ReviewUiState.DateGroupedContent -> {
@@ -352,7 +385,15 @@ private fun NotificationReviewScreen(
                             activeState.dateGroups
                         }
                         if (displayedGroups.isEmpty()) {
-                            ZigEmptyState(title = "No notifications for this date", doodle = { BellDoodle() })
+                            ZigEmptyState(
+                                title = "No notifications for this date",
+                                doodle = {
+                                    Image(
+                                        painter = painterResource(R.drawable.ic_empty_notifications),
+                                        contentDescription = null,
+                                    )
+                                },
+                            )
                         } else {
                             ArchiveDateGroupedContent(
                                 listState = archiveListState,
@@ -482,6 +523,7 @@ private fun ReviewListContent(
     onBlockAndMuteClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
+    onDismiss: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
@@ -501,6 +543,8 @@ private fun ReviewListContent(
                     onAllowClicked = onAllowClicked,
                     onBlockAndMuteClicked = onBlockAndMuteClicked,
                     onSetUserCategory = onSetUserCategory,
+                    // Inbox rows are swipe-to-dismiss; archive rows pass null (see below).
+                    onDismiss = onDismiss,
                     // Spotlight the very first card's category chip during the onboarding tour.
                     spotlightFirstCategory = groupIndex == 0,
                 )
@@ -522,6 +566,8 @@ private fun AppGroupCard(
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
+    // Non-null on the active inbox (enables swipe-to-dismiss); null on the archive.
+    onDismiss: ((Long) -> Unit)? = null,
     spotlightFirstCategory: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(true) }
@@ -529,7 +575,12 @@ private fun AppGroupCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            // Tour: spotlight the whole first group card so both the app-level chip (header)
+            // and the per-notification chips fall inside the lit cut-out.
+            .then(
+                if (spotlightFirstCategory) Modifier.coachMark(TourKeys.REVIEW_CATEGORY) else Modifier,
+            ),
         colors = CardDefaults.cardColors(
             containerColor = if (currentOverride != null)
                 categoryChipColors(currentOverride).container
@@ -553,19 +604,24 @@ private fun AppGroupCard(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items.forEachIndexed { itemIndex, item ->
-                        ReviewItemCard(
-                            item = item,
-                            onAllowClicked = onAllowClicked,
-                            onBlockAndMuteClicked = onBlockAndMuteClicked,
-                            onSetUserCategory = onSetUserCategory,
-                            // Only the first card of the first group carries the tour spotlight.
-                            categoryChipModifier = if (spotlightFirstCategory && itemIndex == 0) {
-                                Modifier.coachMark(TourKeys.REVIEW_CATEGORY)
+                    items.forEach { item ->
+                        // key() so each row keeps its own swipe state positionally and is
+                        // discarded cleanly when the row leaves the list after a dismiss.
+                        key(item.id) {
+                            val card: @Composable () -> Unit = {
+                                ReviewItemCard(
+                                    item = item,
+                                    onAllowClicked = onAllowClicked,
+                                    onBlockAndMuteClicked = onBlockAndMuteClicked,
+                                    onSetUserCategory = onSetUserCategory,
+                                )
+                            }
+                            if (onDismiss != null) {
+                                DismissibleReviewItem(id = item.id, onDismiss = onDismiss, content = card)
                             } else {
-                                Modifier
-                            },
-                        )
+                                card()
+                            }
+                        }
                     }
                 }
             }
@@ -688,6 +744,53 @@ private fun AppGroupHeader(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+// ── Swipe-to-dismiss wrapper (active inbox only) ──────────────────────────────
+
+@Composable
+private fun DismissibleReviewItem(
+    id: Long,
+    onDismiss: (Long) -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        // A completed swipe in either direction dismisses; Settled means the user let go
+        // before the threshold, so the card springs back untouched.
+        confirmValueChange = { value ->
+            if (value != SwipeToDismissBoxValue.Settled) {
+                onDismiss(id)
+                true
+            } else {
+                false
+            }
+        },
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                Alignment.CenterStart
+            } else {
+                Alignment.CenterEnd
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = alignment,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Clear,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        content = { content() },
+    )
 }
 
 // ── Tier B: Notification card ─────────────────────────────────────────────────

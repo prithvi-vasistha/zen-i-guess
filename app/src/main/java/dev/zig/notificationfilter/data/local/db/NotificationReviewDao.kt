@@ -20,6 +20,7 @@ interface NotificationReviewDao {
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED')
+        AND reviewState != 'DISMISSED'
         AND timestamp >= :cutoffTimestamp
         ORDER BY timestamp DESC
     """)
@@ -38,6 +39,12 @@ interface NotificationReviewDao {
     // their mind (ALLOWED → BLOCKED) is re-exported to the training dataset.
     @Query("UPDATE notification_review SET reviewState = :state, syncStatus = 'UNPROCESSED' WHERE id = :id")
     suspend fun updateReviewState(id: Long, state: String)
+
+    // Sets reviewState WITHOUT touching syncStatus or userOverrideStatus. Used by swipe-to-
+    // dismiss (and its Undo), which only hide/restore a row in the inbox and must never
+    // manufacture a training signal the way an explicit Allow/Block does.
+    @Query("UPDATE notification_review SET reviewState = :state WHERE id = :id")
+    suspend fun setReviewStateOnly(id: Long, state: String)
 
     @Query("UPDATE notification_review SET userOverrideStatus = :status WHERE id = :id")
     suspend fun updateOverrideStatus(id: Long, status: String)
@@ -84,6 +91,7 @@ interface NotificationReviewDao {
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
+        AND reviewState != 'DISMISSED'
         AND timestamp >= :cutoffTimestamp
         AND (packageName LIKE '%' || :query || '%'
           OR title      LIKE '%' || :query || '%'

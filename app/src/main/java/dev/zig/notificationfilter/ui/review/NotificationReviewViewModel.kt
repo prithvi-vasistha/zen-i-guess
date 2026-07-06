@@ -281,6 +281,27 @@ class NotificationReviewViewModel @Inject constructor(
         }
     }
 
+    // Remembers each swiped row's prior reviewState so Undo restores it exactly, rather than
+    // assuming PENDING (a dismissed card may have already been ALLOWED or BLOCKED).
+    private val dismissedPriorState = ConcurrentHashMap<Long, ReviewState>()
+
+    // Swipe-to-dismiss (inbox only): hide the row from the active inbox without touching the
+    // override/sync state, so it still lives in the archive and creates no training signal.
+    fun onDismiss(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val prior = dao.getById(id)?.reviewState ?: ReviewState.PENDING
+            dismissedPriorState[id] = prior
+            dao.setReviewStateOnly(id, ReviewState.DISMISSED.name)
+        }
+    }
+
+    fun onRestoreDismissed(id: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val prior = dismissedPriorState.remove(id) ?: ReviewState.PENDING
+            dao.setReviewStateOnly(id, prior.name)
+        }
+    }
+
     // Null category clears the app-level override; non-null upserts it.
     fun setCategoryOverride(packageName: String, category: String?) {
         viewModelScope.launch(Dispatchers.IO) {
