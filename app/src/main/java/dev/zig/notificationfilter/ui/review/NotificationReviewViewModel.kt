@@ -1,6 +1,9 @@
 package dev.zig.notificationfilter.ui.review
 
 import android.content.Context
+import android.graphics.Bitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,9 +14,7 @@ import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
-import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
-import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -70,8 +71,6 @@ class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
     private val overrideDao: AppCategoryOverrideDao,
     private val personalMemory: PersonalMemory,
-    private val preferences: ZigUserPreferences,
-    private val dailySummaryScheduler: DailySummaryScheduler,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -80,25 +79,6 @@ class NotificationReviewViewModel @Inject constructor(
         private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1_000L
         private const val CUTOFF_REFRESH_INTERVAL_MS = 60L * 60L * 1_000L
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d")
-    }
-
-    // ── Settings state ────────────────────────────────────────────────────────
-
-    private val _dailySummaryEnabled = MutableStateFlow(preferences.dailySummaryEnabled)
-    val dailySummaryEnabled: StateFlow<Boolean> = _dailySummaryEnabled.asStateFlow()
-
-    fun setDailySummaryEnabled(enabled: Boolean) {
-        preferences.dailySummaryEnabled = enabled
-        _dailySummaryEnabled.value = enabled
-        if (enabled) dailySummaryScheduler.schedule() else dailySummaryScheduler.cancel()
-    }
-
-    private val _sensitiveNotificationsEnabled = MutableStateFlow(preferences.sensitiveNotificationsEnabled)
-    val sensitiveNotificationsEnabled: StateFlow<Boolean> = _sensitiveNotificationsEnabled.asStateFlow()
-
-    fun setSensitiveNotificationsEnabled(enabled: Boolean) {
-        preferences.sensitiveNotificationsEnabled = enabled
-        _sensitiveNotificationsEnabled.value = enabled
     }
 
     // ── Filter state ──────────────────────────────────────────────────────────
@@ -202,6 +182,10 @@ class NotificationReviewViewModel @Inject constructor(
     private val _packageLabels = MutableStateFlow<Map<String, String>>(emptyMap())
     val packageLabels: StateFlow<Map<String, String>> = _packageLabels.asStateFlow()
 
+    private val iconCache = ConcurrentHashMap<String, ImageBitmap>()
+    private val _appIcons = MutableStateFlow<Map<String, ImageBitmap>>(emptyMap())
+    val appIcons: StateFlow<Map<String, ImageBitmap>> = _appIcons.asStateFlow()
+
     // ── Category overrides ────────────────────────────────────────────────────
 
     val categoryOverrides: StateFlow<Map<String, String>> = overrideDao.getAllFlow()
@@ -244,9 +228,29 @@ class NotificationReviewViewModel @Inject constructor(
                     pkg.substringAfterLast('.')
                 }
                 labelCache[pkg] = label
+
+                // For the demo package, load the real ZiG app icon instead.
+                val iconPkg = if (pkg == DemoDataSeeder.DEMO_PACKAGE) "dev.zig.notificationfilter" else pkg
+                val icon = loadIcon(iconPkg)
+                if (icon != null) iconCache[pkg] = icon
             }
         }
         _packageLabels.value = HashMap(labelCache)
+        _appIcons.value = HashMap(iconCache)
+    }
+
+    // Icons are drawn into a fixed 48×48 px bitmap to bound memory use (same approach as
+    // ManagedAppsViewModel). Adaptive icons can produce very large drawables; the Canvas
+    // draw bounds them without OOM risk on low-end devices.
+    private fun loadIcon(packageName: String): ImageBitmap? = try {
+        val drawable = context.packageManager.getApplicationIcon(packageName)
+        val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        drawable.setBounds(0, 0, 48, 48)
+        drawable.draw(canvas)
+        bitmap.asImageBitmap()
+    } catch (_: Exception) {
+        null
     }
 
     // ── User actions ──────────────────────────────────────────────────────────

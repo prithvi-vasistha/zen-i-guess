@@ -28,6 +28,7 @@ import dev.zig.notificationfilter.ui.logs.LogsScreen
 import dev.zig.notificationfilter.ui.navigation.ZigScreen
 import dev.zig.notificationfilter.ui.review.NotificationReviewRoute
 import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
+import dev.zig.notificationfilter.ui.settings.SettingsScreen
 import dev.zig.notificationfilter.ui.tour.CoachMarkRegistry
 import dev.zig.notificationfilter.ui.tour.LocalCoachMarkRegistry
 import dev.zig.notificationfilter.ui.tour.TOUR_STEPS
@@ -116,9 +117,10 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding),
         ) { page ->
             when (ZigScreen.all[page]) {
-                ZigScreen.Review -> NotificationReviewRoute(onRestartTour = { tourActive = true })
+                ZigScreen.Review -> NotificationReviewRoute()
                 ZigScreen.Apps -> ManagedAppsScreen()
                 ZigScreen.Rules -> CustomRulesScreen()
+                ZigScreen.Settings -> SettingsScreen(onRestartTour = { tourActive = true })
                 ZigScreen.Logs -> LogsScreen()
             }
         }

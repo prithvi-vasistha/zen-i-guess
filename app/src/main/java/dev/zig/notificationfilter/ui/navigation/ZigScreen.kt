@@ -26,6 +26,12 @@ sealed class ZigScreen(
         iconRes = R.drawable.ic_nav_rules,
     )
 
+    data object Settings : ZigScreen(
+        route = "settings",
+        label = "Settings",
+        iconRes = R.drawable.ic_nav_settings,
+    )
+
     data object Logs : ZigScreen(
         route = "logs",
         label = "Logs",
@@ -37,6 +43,6 @@ sealed class ZigScreen(
         // navigable set so it never appears in the bottom bar or the onboarding tour. To re-enable
         // it for development, uncomment it below and uncomment its step in Tour.kt. The Logs screen
         // itself is kept fully intact in code.
-        val all = listOf(Review, Apps, Rules /*, Logs */)
+        val all = listOf(Review, Apps, Rules, Settings /*, Logs */)
     }
 }

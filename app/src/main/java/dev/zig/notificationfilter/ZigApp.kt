@@ -10,6 +10,7 @@ import dagger.hilt.android.HiltAndroidApp
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.db.DefaultRuleSeeder
 import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
@@ -26,6 +27,7 @@ class ZigApp : Application(), Configuration.Provider {
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
+    @Inject lateinit var defaultRuleSeeder: DefaultRuleSeeder
     @Inject lateinit var demoDataSeeder: DemoDataSeeder
 
     @Inject
@@ -44,6 +46,10 @@ class ZigApp : Application(), Configuration.Provider {
         // The NotificationListenerService binds before MainActivity ever opens,
         // so these syncs must happen at Application level, not in any ViewModel.
         appScope.launch {
+            // Seed default rules before the NativeBridge snapshot so they are active
+            // in the Rust filter set from the very first launch.
+            defaultRuleSeeder.seedIfNeeded()
+
             managedAppDao.getAllPackageNames().forEach { pkg ->
                 NativeBridge.addAppToManaged(pkg)
             }

@@ -28,13 +28,13 @@ class DemoDataSeeder @Inject constructor(
 
         val now = System.currentTimeMillis()
 
-        // A message ZiG let through — the card shows "Block & Mute" (with Undo after acting).
+        // A notification ZiG let through — the card shows "Block & Mute" (with Undo after acting).
         reviewDao.insert(
             NotificationReviewEntity(
                 jobId = "${DEMO_JOB_PREFIX}allow",
                 packageName = DEMO_PACKAGE,
-                title = "Alex",
-                content = "Running 10 minutes late — see you soon!",
+                title = "ZiG",
+                content = "2 notifications are waiting for your review. Tap Allow or Block to train ZiG.",
                 timestamp = now - 5 * 60_000L,
                 systemDecision = "PUBLISHED",
                 modelConfidence = 0.08f,
@@ -47,8 +47,8 @@ class DemoDataSeeder @Inject constructor(
             NotificationReviewEntity(
                 jobId = "${DEMO_JOB_PREFIX}block",
                 packageName = DEMO_PACKAGE,
-                title = "MegaMart",
-                content = "FLASH SALE! 70% off everything — ends tonight. Shop now!",
+                title = "Promo blocked",
+                content = "ZiG filtered a promotional alert. Tap Allow if this was important.",
                 timestamp = now - 6 * 60_000L,
                 systemDecision = "MODEL_BLOCKED",
                 modelConfidence = 0.93f,
@@ -63,7 +63,7 @@ class DemoDataSeeder @Inject constructor(
         // Synthetic package for the demo rows. Not installed, so the review screen resolves
         // its label to DEMO_APP_LABEL explicitly (see NotificationReviewViewModel).
         const val DEMO_PACKAGE = "dev.zig.notificationfilter.demo"
-        const val DEMO_APP_LABEL = "Zig Test Notification"
+        const val DEMO_APP_LABEL = "ZiG"
 
         // jobId prefix marking rows as demo data so Personal Memory ignores them.
         const val DEMO_JOB_PREFIX = "demo-"

@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,15 +35,9 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.draw.clip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.Switch
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
@@ -57,6 +54,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -71,6 +69,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -138,7 +138,6 @@ private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
 
 @Composable
 fun NotificationReviewRoute(
-    onRestartTour: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val viewModel: NotificationReviewViewModel = hiltViewModel()
@@ -146,11 +145,10 @@ fun NotificationReviewRoute(
     val archiveUiState by viewModel.archiveUiState.collectAsState()
     val filter by viewModel.filter.collectAsState()
     val packageLabels by viewModel.packageLabels.collectAsState()
+    val appIcons by viewModel.appIcons.collectAsState()
     val categoryOverrides by viewModel.categoryOverrides.collectAsState()
     val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
-    val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -167,6 +165,7 @@ fun NotificationReviewRoute(
         archiveUiState = archiveUiState,
         filter = filter,
         packageLabels = packageLabels,
+        appIcons = appIcons,
         categoryOverrides = categoryOverrides,
         showArchive = showArchive,
         archiveDateFilter = archiveDateFilter,
@@ -180,14 +179,8 @@ fun NotificationReviewRoute(
         onArchiveDateFilterChange = viewModel::setArchiveDateFilter,
         onAllowClicked = viewModel::onAllowClicked,
         onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
-        onUndoClicked = viewModel::onUndoClicked,
         onSetCategoryOverride = viewModel::setCategoryOverride,
         onSetUserCategory = viewModel::setUserAssignedCategory,
-        dailySummaryEnabled = dailySummaryEnabled,
-        onDailySummaryToggled = viewModel::setDailySummaryEnabled,
-        sensitiveNotificationsEnabled = sensitiveNotificationsEnabled,
-        onSensitiveNotificationsToggled = viewModel::setSensitiveNotificationsEnabled,
-        onRestartTour = onRestartTour,
         modifier = modifier,
     )
 }
@@ -201,6 +194,7 @@ private fun NotificationReviewScreen(
     archiveUiState: ReviewUiState,
     filter: ReviewFilter,
     packageLabels: Map<String, String>,
+    appIcons: Map<String, ImageBitmap>,
     categoryOverrides: Map<String, String>,
     showArchive: Boolean,
     archiveDateFilter: LocalDate?,
@@ -214,17 +208,10 @@ private fun NotificationReviewScreen(
     onArchiveDateFilterChange: (LocalDate?) -> Unit,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
-    dailySummaryEnabled: Boolean,
-    onDailySummaryToggled: (Boolean) -> Unit,
-    sensitiveNotificationsEnabled: Boolean,
-    onSensitiveNotificationsToggled: (Boolean) -> Unit,
-    onRestartTour: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showSettingsMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -244,102 +231,6 @@ private fun NotificationReviewScreen(
                         modifier = Modifier.coachMark(TourKeys.REVIEW_ARCHIVE),
                     ) {
                         Text(if (showArchive) "Active" else "Archive")
-                    }
-                    Box {
-                        IconButton(
-                            onClick = { showSettingsMenu = true },
-                            modifier = Modifier.coachMark(TourKeys.REVIEW_SETTINGS),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings",
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showSettingsMenu,
-                            onDismissRequest = { showSettingsMenu = false },
-                            shape = RoundedCornerShape(20.dp),
-                        ) {
-                            // Google-style menu: each item is an inset, rounded, green-tinted
-                            // pill. The gaps between pills separate them (no divider lines), and
-                            // the rounded clip also shapes the press ripple.
-                            val itemBackground = ZigGreen.copy(alpha = 0.08f)
-                            val itemModifier = Modifier
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(itemBackground)
-                            val itemPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
-
-                            DropdownMenuItem(
-                                modifier = itemModifier,
-                                contentPadding = itemPadding,
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Daily Summary",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                            Text(
-                                                text = "8 PM recap notification",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Switch(
-                                            checked = dailySummaryEnabled,
-                                            onCheckedChange = onDailySummaryToggled,
-                                        )
-                                    }
-                                },
-                                onClick = { onDailySummaryToggled(!dailySummaryEnabled) },
-                            )
-                            DropdownMenuItem(
-                                modifier = itemModifier,
-                                contentPadding = itemPadding,
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "Sensitive notifications",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                            )
-                                            Text(
-                                                text = "Show instantly on lock screen (skip filtering)",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        Switch(
-                                            checked = sensitiveNotificationsEnabled,
-                                            onCheckedChange = onSensitiveNotificationsToggled,
-                                        )
-                                    }
-                                },
-                                onClick = { onSensitiveNotificationsToggled(!sensitiveNotificationsEnabled) },
-                            )
-                            DropdownMenuItem(
-                                modifier = itemModifier,
-                                contentPadding = itemPadding,
-                                text = { Text("Replay tour") },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = null,
-                                    )
-                                },
-                                onClick = {
-                                    showSettingsMenu = false
-                                    onRestartTour()
-                                },
-                            )
-                        }
                     }
                 },
             )
@@ -446,10 +337,10 @@ private fun NotificationReviewScreen(
                             listState = inboxListState,
                             groupedItems = activeState.groups,
                             packageLabels = packageLabels,
+                            appIcons = appIcons,
                             categoryOverrides = categoryOverrides,
                             onAllowClicked = onAllowClicked,
                             onBlockAndMuteClicked = onBlockAndMuteClicked,
-                            onUndoClicked = onUndoClicked,
                             onSetCategoryOverride = onSetCategoryOverride,
                             onSetUserCategory = onSetUserCategory,
                         )
@@ -467,10 +358,10 @@ private fun NotificationReviewScreen(
                                 listState = archiveListState,
                                 dateGroups = displayedGroups,
                                 packageLabels = packageLabels,
+                                appIcons = appIcons,
                                 categoryOverrides = categoryOverrides,
                                 onAllowClicked = onAllowClicked,
                                 onBlockAndMuteClicked = onBlockAndMuteClicked,
-                                onUndoClicked = onUndoClicked,
                                 onSetCategoryOverride = onSetCategoryOverride,
                                 onSetUserCategory = onSetUserCategory,
                             )
@@ -585,10 +476,10 @@ private fun ReviewListContent(
     listState: LazyListState,
     groupedItems: Map<String, List<NotificationReviewUiItem>>,
     packageLabels: Map<String, String>,
+    appIcons: Map<String, ImageBitmap>,
     categoryOverrides: Map<String, String>,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -604,11 +495,11 @@ private fun ReviewListContent(
                     packageName = packageName,
                     items = items,
                     appLabel = packageLabels[packageName] ?: packageName.substringAfterLast('.'),
+                    appIcon = appIcons[packageName],
                     currentOverride = categoryOverrides[packageName],
                     onSetCategoryOverride = { category -> onSetCategoryOverride(packageName, category) },
                     onAllowClicked = onAllowClicked,
                     onBlockAndMuteClicked = onBlockAndMuteClicked,
-                    onUndoClicked = onUndoClicked,
                     onSetUserCategory = onSetUserCategory,
                     // Spotlight the very first card's category chip during the onboarding tour.
                     spotlightFirstCategory = groupIndex == 0,
@@ -625,11 +516,11 @@ private fun AppGroupCard(
     packageName: String,
     items: List<NotificationReviewUiItem>,
     appLabel: String,
+    appIcon: ImageBitmap?,
     currentOverride: String?,
     onSetCategoryOverride: (String?) -> Unit,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     spotlightFirstCategory: Boolean = false,
 ) {
@@ -639,12 +530,18 @@ private fun AppGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        colors = CardDefaults.cardColors(containerColor = ZigGreen.copy(alpha = 0.10f)),
+        colors = CardDefaults.cardColors(
+            containerColor = if (currentOverride != null)
+                categoryChipColors(currentOverride).container
+            else
+                ZigGreen.copy(alpha = 0.10f),
+        ),
         shape = MaterialTheme.shapes.large,
     ) {
         Column(modifier = Modifier.animateContentSize()) {
             AppGroupHeader(
                 appLabel = appLabel,
+                appIcon = appIcon,
                 currentOverride = currentOverride,
                 onSetOverride = onSetCategoryOverride,
                 expanded = expanded,
@@ -661,7 +558,6 @@ private fun AppGroupCard(
                             item = item,
                             onAllowClicked = onAllowClicked,
                             onBlockAndMuteClicked = onBlockAndMuteClicked,
-                            onUndoClicked = onUndoClicked,
                             onSetUserCategory = onSetUserCategory,
                             // Only the first card of the first group carries the tour spotlight.
                             categoryChipModifier = if (spotlightFirstCategory && itemIndex == 0) {
@@ -682,6 +578,7 @@ private fun AppGroupCard(
 @Composable
 private fun AppGroupHeader(
     appLabel: String,
+    appIcon: ImageBitmap?,
     currentOverride: String?,
     onSetOverride: (String?) -> Unit,
     expanded: Boolean,
@@ -697,9 +594,34 @@ private fun AppGroupHeader(
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
             ) { onToggle() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (appIcon != null) {
+            Image(
+                bitmap = appIcon,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp)),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(ZigGreen.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = appLabel.take(1).uppercase(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = ZigGreen,
+                )
+            }
+        }
         Text(
             text = appLabel,
             style = MaterialTheme.typography.titleSmall,
@@ -709,8 +631,8 @@ private fun AppGroupHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Spacer(modifier = Modifier.width(8.dp))
         Box {
+            val overrideColors = currentOverride?.let { categoryChipColors(it) }
             SuggestionChip(
                 onClick = { menuExpanded = true },
                 label = {
@@ -722,6 +644,11 @@ private fun AppGroupHeader(
                 icon = if (currentOverride != null) {
                     { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
                 } else null,
+                colors = if (overrideColors != null) SuggestionChipDefaults.suggestionChipColors(
+                    containerColor = overrideColors.container,
+                    labelColor = overrideColors.onContainer,
+                    iconContentColor = overrideColors.onContainer,
+                ) else SuggestionChipDefaults.suggestionChipColors(),
             )
             DropdownMenu(
                 expanded = menuExpanded,
@@ -770,7 +697,6 @@ private fun ReviewItemCard(
     item: NotificationReviewUiItem,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
     categoryChipModifier: Modifier = Modifier,
@@ -846,7 +772,6 @@ private fun ReviewItemCard(
                     isPublishedRow = item.systemDecision == "PUBLISHED",
                     onAllowClicked = onAllowClicked,
                     onBlockAndMuteClicked = onBlockAndMuteClicked,
-                    onUndoClicked = onUndoClicked,
                 )
             }
         }
@@ -864,6 +789,7 @@ private fun CategoryRow(
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     val displayCategory = (item.userAssignedCategory ?: item.inferredCategory).toDisplayCategory()
     val isUserAssigned = item.userAssignedCategory != null
+    val chipColors = categoryChipColors(displayCategory)
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box {
@@ -874,6 +800,11 @@ private fun CategoryRow(
                 icon = if (isUserAssigned) {
                     { Icon(Icons.Default.Check, contentDescription = "User assigned", modifier = Modifier.size(14.dp)) }
                 } else null,
+                colors = SuggestionChipDefaults.suggestionChipColors(
+                    containerColor = chipColors.container,
+                    labelColor = chipColors.onContainer,
+                    iconContentColor = chipColors.onContainer,
+                ),
             )
             DropdownMenu(
                 expanded = categoryMenuExpanded,
@@ -921,53 +852,23 @@ private fun ActionRow(
     isPublishedRow: Boolean,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
 ) {
     Column {
         when (action) {
-            EffectiveCardAction.ALLOW_ONLY -> {
+            EffectiveCardAction.ALLOW_ONLY,
+            EffectiveCardAction.ALLOW_WITH_UNDO -> {
                 Button(
                     onClick = { onAllowClicked(id) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Allow") }
             }
 
-            EffectiveCardAction.BLOCK_AND_MUTE_ONLY -> {
+            EffectiveCardAction.BLOCK_AND_MUTE_ONLY,
+            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> {
                 OutlinedButton(
                     onClick = { onBlockAndMuteClicked(id) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Block & Mute") }
-            }
-
-            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { onBlockAndMuteClicked(id) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Block & Mute") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextButton(
-                        onClick = { onUndoClicked(id) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Undo") }
-                }
-            }
-
-            EffectiveCardAction.ALLOW_WITH_UNDO -> {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Button(
-                        onClick = { onAllowClicked(id) },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    ) { Text("Allow") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    TextButton(
-                        onClick = { onUndoClicked(id) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Undo") }
-                }
             }
         }
 
@@ -989,10 +890,10 @@ private fun ArchiveDateGroupedContent(
     listState: LazyListState,
     dateGroups: List<DateGroup>,
     packageLabels: Map<String, String>,
+    appIcons: Map<String, ImageBitmap>,
     categoryOverrides: Map<String, String>,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
-    onUndoClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
@@ -1012,11 +913,11 @@ private fun ArchiveDateGroupedContent(
                         packageName = packageName,
                         items = items,
                         appLabel = packageLabels[packageName] ?: packageName.substringAfterLast('.'),
+                        appIcon = appIcons[packageName],
                         currentOverride = categoryOverrides[packageName],
                         onSetCategoryOverride = { category -> onSetCategoryOverride(packageName, category) },
                         onAllowClicked = onAllowClicked,
                         onBlockAndMuteClicked = onBlockAndMuteClicked,
-                        onUndoClicked = onUndoClicked,
                         onSetUserCategory = onSetUserCategory,
                     )
                 }

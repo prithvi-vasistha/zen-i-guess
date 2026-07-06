@@ -42,12 +42,14 @@ object TourKeys {
     const val TITLE_REVIEW = "title_review"
     const val TITLE_APPS = "title_apps"
     const val TITLE_RULES = "title_rules"
+    const val TITLE_SETTINGS = "title_settings"
 }
 
 fun navKeyFor(screen: ZigScreen): String = when (screen) {
     ZigScreen.Review -> TourKeys.NAV_REVIEW
     ZigScreen.Apps -> TourKeys.NAV_APPS
     ZigScreen.Rules -> TourKeys.NAV_RULES
+    ZigScreen.Settings -> TourKeys.TITLE_SETTINGS
     ZigScreen.Logs -> TourKeys.NAV_LOGS
 }
 
