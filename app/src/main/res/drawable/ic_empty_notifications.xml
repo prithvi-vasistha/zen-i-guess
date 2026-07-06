@@ -1,0 +1,48 @@
+<!--
+  Empty-state doodle for the Notifications / Archive screen: a calm bell with a couple
+  of sparkles on a soft shadow — "you're all caught up". Line-art in ZigGreen to match
+  the Managed Apps empty state.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="150dp"
+    android:height="129dp"
+    android:viewportWidth="128"
+    android:viewportHeight="110">
+
+    <!-- Soft ground shadow. -->
+    <path
+        android:fillColor="#FFEEEEEE"
+        android:pathData="M26,92 a38,5 0 1 0 76,0 a38,5 0 1 0 -76,0 z" />
+
+    <!-- Bell body. -->
+    <path
+        android:fillColor="#FFC8E6C9"
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M64,28 C51,28 45,41 44,57 C44,62 42,67 38,71 L90,71 C86,67 84,62 84,57 C83,41 77,28 64,28 Z" />
+
+    <!-- Hanger loop at the top. -->
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M59,27 C59,20 69,20 69,27" />
+
+    <!-- Clapper. -->
+    <path
+        android:fillColor="#FF4CAF50"
+        android:pathData="M60.5,76 a3.5,3.5 0 1 0 7,0 a3.5,3.5 0 1 0 -7,0 z" />
+
+    <!-- Sparkles. -->
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M32,30 v8 M28,34 h8" />
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M97,40 v6 M94,43 h6" />
+</vector>

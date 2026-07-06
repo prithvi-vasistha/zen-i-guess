@@ -1,0 +1,53 @@
+<!--
+  Empty-state doodle for the Rules screen: a keyword card with a few text lines and a
+  green "active rule" check badge, plus sparkles on a soft shadow. Line-art in ZigGreen
+  to match the Managed Apps empty state.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="150dp"
+    android:height="129dp"
+    android:viewportWidth="128"
+    android:viewportHeight="110">
+
+    <!-- Soft ground shadow. -->
+    <path
+        android:fillColor="#FFEEEEEE"
+        android:pathData="M28,94 a36,5 0 1 0 72,0 a36,5 0 1 0 -72,0 z" />
+
+    <!-- Rule card. -->
+    <path
+        android:fillColor="#FFC8E6C9"
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2.5"
+        android:pathData="M42,24 h44 a8,8 0 0 1 8,8 v40 a8,8 0 0 1 -8,8 h-44 a8,8 0 0 1 -8,-8 v-40 a8,8 0 0 1 8,-8 z" />
+
+    <!-- Keyword lines. -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M44,40 h34 M44,50 h34 M44,60 h22" />
+
+    <!-- "Active rule" check badge. -->
+    <path
+        android:fillColor="#FF4CAF50"
+        android:pathData="M82,74 a10,10 0 1 0 20,0 a10,10 0 1 0 -20,0 z" />
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M87.5,74.5 L90.5,78 L96.5,70.5" />
+
+    <!-- Sparkles. -->
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M26,20 v8 M22,24 h8" />
+    <path
+        android:strokeColor="#FF4CAF50"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M104,30 v6 M101,33 h6" />
+</vector>

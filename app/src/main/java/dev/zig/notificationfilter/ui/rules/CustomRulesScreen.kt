@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.ui.rules
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
-import dev.zig.notificationfilter.ui.common.BookDoodle
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.tour.TourKeys
@@ -144,7 +144,12 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
             ZigEmptyState(
                 title = "No rules yet",
                 subtitle = "Add keywords above to get started.",
-                doodle = { BookDoodle() },
+                doodle = {
+                    Image(
+                        painter = painterResource(R.drawable.ic_empty_rules),
+                        contentDescription = null,
+                    )
+                },
             )
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
