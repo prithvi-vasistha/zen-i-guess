@@ -73,8 +73,10 @@ onNotificationPosted()
   │   (e.g. "OTP", "verification", "cab, arriving").
   │
   └─ Layer 4 · On-device ML ensemble ─────────────────────── ALLOW → publish · BLOCK → suppress
-      When all deterministic layers miss, a Retrieval-
-      Augmented Classifier decides (see below).
+      When all deterministic layers miss, an exact-match cache
+      replays any identical past override for free; only on a
+      miss does the Retrieval-Augmented Classifier decide
+      (see below).
 ```
 
 Notifications that pass are re-published under ZiG's own high-importance channel so they surface as heads-up banners. Every stage of every decision is written to a local database, giving a full, inspectable trace for each notification.
@@ -85,7 +87,9 @@ Contact matching is backed by a native **Rust engine** exposed to Kotlin over JN
 
 ### Layer 4 — the on-device ML ensemble
 
-When a notification survives every deterministic layer, ZiG hands it to a **Retrieval-Augmented Classification (RAC)** ensemble that combines two independent signals:
+When a notification survives every deterministic layer, ZiG hands it to a **Retrieval-Augmented Classification (RAC)** ensemble.
+
+**Layer 0 — deterministic exact-match cache.** Before any inference, the ensemble checks whether the notification's text exactly matches one you have previously overridden (allowed or blocked). On a hit, that past verdict is replayed instantly — **no embedding, no TFLite inference, no KNN search** — making a repeated notification a zero-cost, perfectly deterministic decision. The lookup is a case-insensitive, index-backed equality query, and its key is the notification's **newest message** rather than a rolling conversation transcript, so a message repeated in a chat thread reliably hits the cache even as the thread grows. Only when the cache misses does ZiG combine two independent learned signals:
 
 1. **Base classifier ("Base Instinct").** A custom TFLite text classifier trained on a purpose-built dataset of allow/block-labelled notifications. Text is tokenised with the same Keras vocabulary the model was trained against and reduced to a single `P(BLOCK)` score. The model is memory-mapped from the APK, lazily initialised once, and serialised behind a mutex.
 
@@ -208,7 +212,7 @@ The resulting APK is written to `app/build/outputs/apk/debug/`. Install it on a 
 1. **Privacy first** — no notification content or user data ever leaves the device.
 2. **Offline first** — full functionality with no network connection, ever.
 3. **Battery efficient** — deterministic Rust gates run in microseconds; the ML models are lazy-loaded and reused, never polled.
-4. **Deterministic** — the rule layers always run before ML. If a deterministic layer fires, the models are never invoked.
+4. **Deterministic** — the rule layers always run before ML, and even inside the ML lane an exact-match cache replays identical past overrides before any inference. If a deterministic layer fires, the models are never invoked.
 5. **Maintainable** — small functions, immutable data, explicit Room migrations.
 6. **Explainable** — every decision is logged with a reason, a job ID, and a timestamp.
 
