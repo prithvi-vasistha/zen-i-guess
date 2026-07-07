@@ -1,11 +1,14 @@
 package dev.zig.notificationfilter.ui.review
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -51,6 +54,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -67,6 +71,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +94,7 @@ import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
+import dev.zig.notificationfilter.ui.theme.ZigOnGreen
 import dev.zig.notificationfilter.ui.tour.TourKeys
 import dev.zig.notificationfilter.ui.tour.coachMark
 import java.time.Instant
@@ -415,6 +421,37 @@ private fun NotificationReviewScreen(
                         .align(Alignment.BottomEnd)
                         .padding(16.dp),
                 )
+
+                // "N new notifications" affordance. Only meaningful when new arrivals land at
+                // the top — i.e. Time · Newest-first. Other sorts place them elsewhere, so the
+                // scroll-to-top / count would mislead; keep it off for those.
+                val newItemsTrackable =
+                    filter.sortField == SortField.TIME && filter.sortDirection == SortDirection.DESC
+                if (newItemsTrackable) {
+                    val activeItemTimestamps: List<Long> = when (activeState) {
+                        is ReviewUiState.Content ->
+                            activeState.groups.values.flatten().map { it.timestamp }
+                        is ReviewUiState.DateGroupedContent -> {
+                            val groups = if (archiveDateFilter != null) {
+                                activeState.dateGroups.filter { it.date == archiveDateFilter }
+                            } else {
+                                activeState.dateGroups
+                            }
+                            groups.flatMap { it.appGroups.values.flatten() }.map { it.timestamp }
+                        }
+                        else -> emptyList()
+                    }
+                    // key(showArchive): inbox and archive each keep their own "seen" marker.
+                    key(showArchive) {
+                        NewNotificationsIndicator(
+                            listState = activeListState,
+                            itemTimestamps = activeItemTimestamps,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 8.dp),
+                        )
+                    }
+                }
             }
         }
         } // PullToRefreshBox
@@ -549,6 +586,94 @@ private fun ReviewListContent(
                     spotlightFirstCategory = groupIndex == 0,
                 )
             }
+        }
+    }
+}
+
+// ── "New notifications" indicator (inbox + archive) ───────────────────────────
+// Feed-style affordance: when the model processes a notification while the user is at the top,
+// scroll to reveal it; when they have scrolled to a custom position, surface a tappable "N new"
+// pill instead of yanking them upward. The caller only mounts this under Time · Newest-first.
+
+@Composable
+private fun NewNotificationsIndicator(
+    listState: LazyListState,
+    itemTimestamps: List<Long>,
+    modifier: Modifier = Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    val newestTs = itemTimestamps.maxOrNull() ?: 0L
+
+    // The newest timestamp already shown to the user at the top. -1 until the first emission
+    // initialises it, so existing notifications never count as "new" when the screen opens.
+    var seenNewestTs by remember { mutableStateOf(-1L) }
+    val isAtTop by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+        }
+    }
+    val newCount = if (seenNewestTs < 0L) 0 else itemTimestamps.count { it > seenNewestTs }
+
+    LaunchedEffect(newestTs, isAtTop) {
+        when {
+            seenNewestTs < 0L -> seenNewestTs = newestTs        // first load: acknowledge existing
+            isAtTop -> {
+                // At the top: reveal any newly-arrived card (LazyColumn otherwise keeps the old
+                // top item anchored, leaving the new one just off-screen above), then acknowledge.
+                if (newestTs > seenNewestTs) listState.animateScrollToItem(0)
+                seenNewestTs = newestTs
+            }
+            // Scrolled away: leave the marker so the pill reflects the growing backlog.
+        }
+    }
+
+    AnimatedVisibility(
+        visible = newCount > 0 && !isAtTop,
+        enter = fadeIn() + slideInVertically { -it },
+        exit = fadeOut() + slideOutVertically { -it },
+        modifier = modifier,
+    ) {
+        NewNotificationsPill(
+            count = newCount,
+            onClick = {
+                scope.launch {
+                    listState.animateScrollToItem(0)
+                    seenNewestTs = newestTs
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun NewNotificationsPill(
+    count: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = ZigGreen,
+        contentColor = ZigOnGreen,
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowUp,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = if (count == 1) "1 new notification" else "$count new notifications",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
