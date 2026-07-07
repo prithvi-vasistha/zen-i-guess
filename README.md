@@ -8,13 +8,10 @@
   <p><strong>🌐 Website:</strong> <a href="https://prithvi-vasistha.github.io/zig-landing/">prithvi-vasistha.github.io/zig-landing</a></p>
 
   <p>
-    <a href="https://prithvi-vasistha.github.io/zig-landing/"><img src="https://img.shields.io/badge/website-live-3DDC84" alt="Website" /></a>
     <img src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white" alt="Platform: Android" />
     <img src="https://img.shields.io/badge/min%20SDK-26-3DDC84" alt="Min SDK 26" />
     <img src="https://img.shields.io/badge/Kotlin-2.0.21-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin 2.0.21" />
     <img src="https://img.shields.io/badge/Rust-JNI-CE422B?logo=rust&logoColor=white" alt="Rust JNI" />
-    <img src="https://img.shields.io/badge/internet-0%20access-critical" alt="No internet access" />
-    <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT" />
   </p>
 </div>
 
@@ -75,8 +72,8 @@ onNotificationPosted()
   └─ Layer 4 · On-device ML ensemble ─────────────────────── ALLOW → publish · BLOCK → suppress
       When all deterministic layers miss, an exact-match cache
       replays any identical past override for free; only on a
-      miss does the Retrieval-Augmented Classifier decide
-      (see below).
+      miss does the Retrieval-Augmented Classifier decide.
+      
 ```
 
 Notifications that pass are re-published under ZiG's own high-importance channel so they surface as heads-up banners. Every stage of every decision is written to a local database, giving a full, inspectable trace for each notification.
