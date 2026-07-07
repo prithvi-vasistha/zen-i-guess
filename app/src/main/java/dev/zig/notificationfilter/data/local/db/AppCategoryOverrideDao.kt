@@ -20,6 +20,10 @@ interface AppCategoryOverrideDao {
     @Query("SELECT * FROM app_category_override")
     fun getAllFlow(): Flow<List<AppCategoryOverrideEntity>>
 
+    // One-shot read of every override, used by the backup exporter.
+    @Query("SELECT * FROM app_category_override")
+    suspend fun getAllSnapshot(): List<AppCategoryOverrideEntity>
+
     @Query("DELETE FROM app_category_override WHERE packageName = :packageName")
     suspend fun delete(packageName: String)
 }

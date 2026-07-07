@@ -147,10 +147,17 @@ interface NotificationReviewDao {
 
     // ── Backup / Restore ───────────────────────────────────────────────────────
 
-    // Every row the user has explicitly overridden — the exportable RAC corpus.
-    // Mirrors the personal-memory / exact-match selection (userOverrideStatus != 'NONE')
-    // but ignores whether an embedding exists, since the backup carries text only.
-    @Query("SELECT * FROM notification_review WHERE userOverrideStatus != 'NONE'")
+    // Every real row the user has explicitly overridden — the exportable RAC corpus.
+    // Carries text only (no embedding), so rows with a blank messageText are useless (they
+    // can neither exact-match nor re-embed) and are excluded. Demo rows (jobId 'demo-…') are
+    // seeded illustrations, not the user's data, and are excluded too — mirroring the way
+    // PersonalMemoryRepository already skips them from the KNN corpus.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE userOverrideStatus != 'NONE'
+        AND messageText != ''
+        AND jobId NOT LIKE 'demo-%'
+    """)
     suspend fun getAllOverrides(): List<NotificationReviewEntity>
 
     // Bulk-inserts restored overrides and returns the newly-assigned row ids (in input

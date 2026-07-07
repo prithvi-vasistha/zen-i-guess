@@ -85,7 +85,12 @@ class SettingsViewModel @Inject constructor(
                 // Reflect restored preference values in the toggles immediately.
                 _dailySummaryEnabled.value = preferences.dailySummaryEnabled
                 _sensitiveNotificationsEnabled.value = preferences.sensitiveNotificationsEnabled
-                _messages.send("Restored ${result.overridesRestored} saved decisions.")
+                _messages.send(
+                    "Restore complete: +${result.managedAppsAdded} apps, " +
+                        "+${result.keywordRulesAdded} rules, " +
+                        "${result.categoryOverridesRestored} categories, " +
+                        "${result.overridesRestored} saved decisions.",
+                )
             } catch (e: IncompatibleBackupVersionException) {
                 _messages.send("This backup was made by a newer version of ZiG and can't be imported.")
             } catch (e: Exception) {

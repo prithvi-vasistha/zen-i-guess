@@ -1,5 +1,12 @@
 package dev.zig.notificationfilter.domain.backup
 
+import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
+import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
+import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
+import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
+import dev.zig.notificationfilter.data.local.db.ManagedAppDao
+import dev.zig.notificationfilter.data.local.db.ManagedAppEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
@@ -7,6 +14,7 @@ import dev.zig.notificationfilter.data.local.db.SyncStatus
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.embedding.TextEmbedder
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
+import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -24,6 +32,9 @@ class IncompatibleBackupVersionException(val fileVersion: Int) :
 data class RestoreResult(
     val overridesRestored: Int,
     val overridesEmbedded: Int,
+    val managedAppsAdded: Int,
+    val keywordRulesAdded: Int,
+    val categoryOverridesRestored: Int,
 )
 
 /**
@@ -31,21 +42,31 @@ data class RestoreResult(
  * Backup & Restore via the Storage Access Framework. No network, no cloud — the caller
  * supplies a user-chosen stream from `contentResolver.open{Input,Output}Stream(uri)`.
  *
- * Two data sets travel in the payload:
- *  - the two user-facing preference toggles, and
+ * The payload carries everything needed to reproduce a user's setup on a new device:
+ *  - the user-facing preference toggles,
+ *  - the managed-apps list, keyword rules and per-app category overrides, and
  *  - the RAC (Retrieval-Augmented Classification) override corpus as TEXT + verdict.
  *
- * On restore, each override is reconstructed as a synthetic review row tagged
- * `systemDecision = "RESTORED"`. That tag keeps it out of the inbox and archive (whose
- * queries filter on the real decision values) while still feeding the personal-memory and
- * exact-match layers (which key only on `userOverrideStatus` / `messageText`). Embeddings
- * are recomputed on-device from the restored text — never carried in the file — so a backup
- * stays valid even if the embedding model changes between export and import.
+ * Restore is non-destructive (merge/union): it adds to the target device without removing
+ * anything already there, and re-importing the same file is idempotent. Two details matter:
+ *
+ *  - Managed apps and keyword rules also live in the Rust filter engine ([NativeBridge]),
+ *    which the notification service actually consults. Writing Room is not enough, so restore
+ *    re-syncs the engine exactly as ZigApp does on cold start.
+ *  - Each override is reconstructed as a synthetic review row tagged `systemDecision =
+ *    "RESTORED"`, which keeps it out of the inbox/archive (they filter on real decision
+ *    values) while still feeding the personal-memory and exact-match layers. Embeddings are
+ *    recomputed on-device from the restored text — never carried in the file — so a backup
+ *    stays valid even if the embedding model changes between export and import.
  */
 @Singleton
 class BackupRestoreManager @Inject constructor(
     private val dao: NotificationReviewDao,
+    private val managedAppDao: ManagedAppDao,
+    private val keywordRuleDao: KeywordRuleDao,
+    private val categoryOverrideDao: AppCategoryOverrideDao,
     private val preferences: ZigUserPreferences,
+    private val dailySummaryScheduler: DailySummaryScheduler,
     private val embedder: TextEmbedder,
     private val personalMemory: PersonalMemory,
 ) {
@@ -68,6 +89,11 @@ class BackupRestoreManager @Inject constructor(
                 dailySummaryEnabled = preferences.dailySummaryEnabled,
                 sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
             ),
+            managedApps = managedAppDao.getAllPackageNames(),
+            keywordRules = keywordRuleDao.getAllSnapshot().map { it.conditions },
+            categoryOverrides = categoryOverrideDao.getAllSnapshot().map {
+                CategoryOverrideEntry(it.packageName, it.defaultCategory)
+            },
             racMemory = dao.getAllOverrides().map { row ->
                 RacMemoryEntry(
                     messageText = row.messageText,
@@ -98,17 +124,50 @@ class BackupRestoreManager @Inject constructor(
             throw IncompatibleBackupVersionException(payload.version)
         }
 
-        // 1. Preferences.
+        // 1. Preferences. Re-run the daily-summary scheduler side-effect so the WorkManager
+        //    job matches the imported toggle (writing the flag alone would leave them drifted).
         preferences.dailySummaryEnabled = payload.preferences.dailySummaryEnabled
         preferences.sensitiveNotificationsEnabled = payload.preferences.sensitiveNotificationsEnabled
+        if (payload.preferences.dailySummaryEnabled) dailySummaryScheduler.schedule()
+        else dailySummaryScheduler.cancel()
 
-        // 2. Override corpus. Drop any prior restore first so re-importing is idempotent.
+        // 2. Managed apps (merge). INSERT IGNORE dedupes by packageName; the Rust engine is the
+        //    thing the service actually checks, so mirror each into it as ZigApp does on start.
+        val existingApps = managedAppDao.getAllPackageNames().toSet()
+        var managedAppsAdded = 0
+        payload.managedApps.forEach { pkg ->
+            managedAppDao.insert(ManagedAppEntity(pkg))
+            NativeBridge.addAppToManaged(pkg)
+            if (pkg !in existingApps) managedAppsAdded++
+        }
+
+        // 3. Keyword rules (merge, de-duplicated by their condition list). After writing, rebuild
+        //    the Rust keyword set from the full Room snapshot so it reflects the merged rules.
+        val existingRules = keywordRuleDao.getAllSnapshot().map { it.conditions }.toMutableSet()
+        var keywordRulesAdded = 0
+        payload.keywordRules.forEach { conditions ->
+            if (conditions.isNotEmpty() && existingRules.add(conditions)) {
+                keywordRuleDao.insert(KeywordRuleEntity(conditions = conditions))
+                keywordRulesAdded++
+            }
+        }
+        NativeBridge.clearKeywordWhitelist()
+        keywordRuleDao.getAllSnapshot().forEach { rule ->
+            NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
+        }
+
+        // 4. Category overrides (upsert — REPLACE by packageName).
+        payload.categoryOverrides.forEach {
+            categoryOverrideDao.upsert(AppCategoryOverrideEntity(it.packageName, it.defaultCategory))
+        }
+
+        // 5. Override corpus. Drop any prior restore first so re-importing is idempotent.
         val entries = payload.racMemory
         val rows = entries.map { it.toRestoredEntity() }
         dao.deleteRestored()
         val ids = dao.restoreOverrides(rows)
 
-        // 3. Re-embed each restored row from its text so it can rejoin the KNN corpus.
+        // 6. Re-embed each restored row from its text so it can rejoin the KNN corpus.
         //    A blank/failed embedding is skipped — the row still serves the exact-match layer.
         var embedded = 0
         entries.forEachIndexed { index, entry ->
@@ -117,10 +176,16 @@ class BackupRestoreManager @Inject constructor(
             embedded++
         }
 
-        // 4. Refresh the in-memory corpus cache so restored memory takes effect immediately.
+        // 7. Refresh the in-memory corpus cache so restored memory takes effect immediately.
         personalMemory.reload()
 
-        RestoreResult(overridesRestored = rows.size, overridesEmbedded = embedded)
+        RestoreResult(
+            overridesRestored = rows.size,
+            overridesEmbedded = embedded,
+            managedAppsAdded = managedAppsAdded,
+            keywordRulesAdded = keywordRulesAdded,
+            categoryOverridesRestored = payload.categoryOverrides.size,
+        )
     }
 }
 

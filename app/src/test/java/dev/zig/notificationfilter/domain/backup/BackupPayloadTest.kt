@@ -21,6 +21,11 @@ class BackupPayloadTest {
             dailySummaryEnabled = true,
             sensitiveNotificationsEnabled = false,
         ),
+        managedApps = listOf("com.bank.app", "com.chat.app"),
+        keywordRules = listOf(listOf("OTP", "verification"), listOf("code")),
+        categoryOverrides = listOf(
+            CategoryOverrideEntry(packageName = "com.bank.app", defaultCategory = "FINANCE"),
+        ),
         racMemory = listOf(
             RacMemoryEntry(
                 messageText = "Your OTP is 123456",
@@ -48,12 +53,32 @@ class BackupPayloadTest {
         assertTrue(text.contains("\"export_date\""))
         assertTrue(text.contains("\"daily_summary_enabled\""))
         assertTrue(text.contains("\"sensitive_notifications_enabled\""))
+        assertTrue(text.contains("\"managed_apps\""))
+        assertTrue(text.contains("\"keyword_rules\""))
+        assertTrue(text.contains("\"category_overrides\""))
         assertTrue(text.contains("\"rac_memory\""))
     }
 
     @Test
     fun `version defaults to the current schema version`() {
         assertEquals(BackupPayload.CURRENT_VERSION, sample().version)
+    }
+
+    @Test
+    fun `a v1 file without the new sections still imports with empty defaults`() {
+        val v1 = """
+            {
+              "version": 1,
+              "export_date": 100,
+              "preferences": { "daily_summary_enabled": true, "sensitive_notifications_enabled": true },
+              "rac_memory": []
+            }
+        """.trimIndent()
+        val payload = json.decodeFromString(BackupPayload.serializer(), v1)
+        assertEquals(1, payload.version)
+        assertTrue(payload.managedApps.isEmpty())
+        assertTrue(payload.keywordRules.isEmpty())
+        assertTrue(payload.categoryOverrides.isEmpty())
     }
 
     @Test
