@@ -4,6 +4,8 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
@@ -218,7 +221,8 @@ fun TourOverlay(
                         start = 20.dp,
                         end = 20.dp,
                     ),
-                contentAlignment = Alignment.Center,
+                // Centre horizontally; place vertically per the step's bias (0 = centre).
+                contentAlignment = BiasAlignment(0f, step.verticalBias),
             ) {
                 TourTooltip(
                     controller = controller,
@@ -241,7 +245,14 @@ private fun TourTooltip(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        // verticalScroll bounds the card to its free region: at very large system font sizes the
+        // body can exceed the space above/below the spotlight, and scrolling keeps every word and
+        // the action buttons reachable instead of overflowing off-screen.
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
+        ) {
             Text(
                 text = "${controller.currentIndex + 1} / ${controller.steps.size}",
                 style = MaterialTheme.typography.labelSmall,

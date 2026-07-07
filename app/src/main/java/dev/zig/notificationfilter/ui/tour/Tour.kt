@@ -10,15 +10,19 @@ import dev.zig.notificationfilter.ui.navigation.ZigScreen
 /**
  * One stop on the guided tour.
  *
- * @param tab       index into [ZigScreen.all] the pager should show for this step.
- * @param targetKey coach-mark key to spotlight, or null for a centered message with
- *                  no cut-out (welcome / finish cards).
+ * @param tab          index into [ZigScreen.all] the pager should show for this step.
+ * @param targetKey    coach-mark key to spotlight, or null for a centered message with
+ *                     no cut-out (welcome / finish cards).
+ * @param verticalBias vertical placement of the tooltip within its free region: 0f centres it
+ *                     (the default), positive nudges it down, negative up. Used to lower the
+ *                     large-empty-space cards on the Apps screen so they don't feel adrift.
  */
 data class TourStep(
     val tab: Int,
     val targetKey: String?,
     val title: String,
     val body: String,
+    val verticalBias: Float = 0f,
 )
 
 /** Stable coach-mark keys shared between the instrumented screens and the tour steps. */
@@ -70,12 +74,13 @@ val TOUR_STEPS: List<TourStep> = listOf(
         targetKey = TourKeys.APPS_ADD_FAB,
         title = "Add apps",
         body = "Tap ＋ to pick which apps ZiG manages. Choose an app, confirm, and ZiG starts filtering its notifications. Apps you don't add pass through untouched.",
+        verticalBias = 0.3f,
     ),
     TourStep(
         tab = TAB_REVIEW,
         targetKey = TourKeys.REVIEW_CATEGORY,
         title = "Sort by category",
-        body = "ZiG tags every notification with a category. Tap an app's chip to set a default for everything it sends, or a single notification's chip to fix just that one — ZiG learns from each change.",
+        body = "Every notification gets a category. Tap an app's chip to set its default, or one notification's chip to fix just that — ZiG learns from each change.",
     ),
     TourStep(
         tab = TAB_REVIEW,
@@ -94,6 +99,7 @@ val TOUR_STEPS: List<TourStep> = listOf(
         targetKey = null,
         title = "You're ready to go",
         body = "That's it! Head to Apps to choose what ZiG should watch. You can revisit any screen from the bottom bar anytime.",
+        verticalBias = 0.3f,
     ),
 )
 

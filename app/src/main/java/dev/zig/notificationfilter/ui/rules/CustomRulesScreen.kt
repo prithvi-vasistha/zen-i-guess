@@ -44,6 +44,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.R
@@ -111,8 +112,10 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 onValueChange = { inputText = it },
                 placeholder = {
                     Text(
-                        text = "Add keyword (use comma to chain: 'cab, arriving')",
+                        text = "Add keyword (comma to chain)",
                         style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 },
                 singleLine = true,
