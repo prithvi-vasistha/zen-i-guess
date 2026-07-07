@@ -177,7 +177,7 @@ native/rust_filter/              # Rust JNI library (cdylib)
 | Build system | Gradle Kotlin DSL + AGP | 8.5.2 |
 | NDK | NDK | 27.0.12077973 |
 | Min SDK | Android 8.0 Oreo | API 26 |
-| Target SDK | Android 14 | API 34 |
+| Target SDK | Android 15 | API 34 |
 
 ---
 
