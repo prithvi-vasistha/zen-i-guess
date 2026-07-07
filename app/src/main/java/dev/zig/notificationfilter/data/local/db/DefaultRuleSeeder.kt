@@ -41,6 +41,10 @@ class DefaultRuleSeeder @Inject constructor(
             listOf("has been credited"),
             listOf("has been debited"),
             listOf("has been delivered"),
+            // A chained (AND) rule: the notification must contain BOTH terms. Seeded so users
+            // see how comma-separated chaining works out of the box — e.g. a ride's arrival
+            // alert ("Your cab is arriving") passes, while either word alone does not.
+            listOf("cab", "arriving"),
         )
     }
 }
