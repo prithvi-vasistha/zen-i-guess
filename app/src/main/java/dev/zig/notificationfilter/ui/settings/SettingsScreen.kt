@@ -1,5 +1,7 @@
 package dev.zig.notificationfilter.ui.settings
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -38,6 +40,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,7 +59,18 @@ fun SettingsScreen(
     val viewModel: SettingsViewModel = hiltViewModel()
     val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
     val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
+    val contactsBypassEnabled by viewModel.contactsBypassEnabled.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
+
+    val context = LocalContext.current
+
+    // Launched when the user enables the contacts bypass without READ_CONTACTS being granted.
+    // If granted, the ViewModel enables and registers the observer; if denied, no-op (toggle stays off).
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) viewModel.setContactsBypassEnabled(true)
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     // One-shot results from export/import land here as a Snackbar.
@@ -124,6 +139,27 @@ fun SettingsScreen(
                     subtitle = "Show instantly on lock screen (skip filtering)",
                     checked = sensitiveNotificationsEnabled,
                     onCheckedChange = viewModel::setSensitiveNotificationsEnabled,
+                )
+            }
+            item {
+                SettingsToggleRow(
+                    title = "Smart Contact Bypass",
+                    subtitle = "Automatically allow notifications from your contacts",
+                    checked = contactsBypassEnabled,
+                    onCheckedChange = { enabled ->
+                        if (!enabled) {
+                            viewModel.setContactsBypassEnabled(false)
+                        } else {
+                            val hasPermission = ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.READ_CONTACTS,
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasPermission) {
+                                viewModel.setContactsBypassEnabled(true)
+                            } else {
+                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            }
+                        }
+                    },
                 )
             }
             item {

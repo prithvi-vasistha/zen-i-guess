@@ -14,6 +14,7 @@ import dev.zig.notificationfilter.data.local.db.DefaultRuleSeeder
 import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -29,6 +30,7 @@ class ZigApp : Application(), Configuration.Provider {
     @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
     @Inject lateinit var defaultRuleSeeder: DefaultRuleSeeder
     @Inject lateinit var demoDataSeeder: DemoDataSeeder
+    @Inject lateinit var preferences: ZigUserPreferences
 
     @Inject
     @ApplicationScope
@@ -61,21 +63,24 @@ class ZigApp : Application(), Configuration.Provider {
             demoDataSeeder.seedIfNeeded()
         }
 
-        // Register the ContentObserver for the full process lifetime so any contacts
-        // change (add, edit, delete) is reflected in the Rust HashSet automatically.
-        contactsSyncManager.register()
+        // The ContactObserver must not be started before onboarding is complete.
+        // The setup checklist is the gated path for READ_CONTACTS acquisition;
+        // starting the observer earlier would crash on Samsung devices, which enforce
+        // the permission at ContentObserver registration time.
+        // On subsequent cold starts (onboarding already done) both calls are safe:
+        // register() is permission-guarded and idempotent, syncContacts() is
+        // guarded by its own permission check below.
+        if (preferences.onboardingCompleted && preferences.contactsBypassEnabled) {
+            contactsSyncManager.register()
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
+                    PermissionChecker.PERMISSION_GRANTED) {
+                contactsSyncManager.syncContacts()
+            }
+        }
 
         // Enqueue the daily summary worker. KEEP policy means this is a no-op on every
         // subsequent launch once already scheduled. Users who opt out call cancel() from
         // the ViewModel, which removes the unique work entry; re-enabling calls schedule().
         dailySummaryScheduler.schedule()
-
-        // Perform the initial sync now if READ_CONTACTS was already granted on a previous
-        // launch. If not yet granted, MainActivity.onResume() calls requestSyncIfNeeded()
-        // after the runtime permission prompt resolves.
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
-                PermissionChecker.PERMISSION_GRANTED) {
-            contactsSyncManager.syncContacts()
-        }
     }
 }

@@ -130,7 +130,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // These drop noise before entering the tracked pipeline — no log row,
         // no UUID, no DB write. Order matters: cheapest checks first.
 
-        // 1. ZiG's own forwarded notifications must never re-enter the pipeline.
+        // 1. ZiG's own notifications must not re-enter the pipeline.
         if (packageName == this.packageName) return
 
         // 2. Ongoing notifications are background tasks, syncs, and media players.

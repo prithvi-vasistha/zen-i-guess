@@ -72,6 +72,20 @@ class ContactsSyncManager @Inject constructor(
         }
     }
 
+    /**
+     * Stops observing contacts and clears the Rust in-process contact whitelist.
+     * Called when the user disables the Smart Contact Bypass from Settings.
+     * Does NOT revoke READ_CONTACTS — the OS permission is left intact.
+     * Safe to call if never registered.
+     */
+    fun unregister() {
+        if (!isRegistered) return
+        context.contentResolver.unregisterContentObserver(observer)
+        isRegistered = false
+        initialSyncDone = false
+        NativeBridge.clearContactWhitelist()
+    }
+
     private fun doSync() {
         if (!hasContactsPermission()) return
         try {

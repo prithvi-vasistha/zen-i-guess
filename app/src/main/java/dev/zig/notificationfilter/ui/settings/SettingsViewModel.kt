@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.backup.BackupRestoreManager
 import dev.zig.notificationfilter.domain.backup.IncompatibleBackupVersionException
@@ -24,6 +25,7 @@ class SettingsViewModel @Inject constructor(
     private val preferences: ZigUserPreferences,
     private val dailySummaryScheduler: DailySummaryScheduler,
     private val backupRestoreManager: BackupRestoreManager,
+    private val contactsSyncManager: ContactsSyncManager,
 ) : ViewModel() {
 
     private val _dailySummaryEnabled = MutableStateFlow(preferences.dailySummaryEnabled)
@@ -41,6 +43,26 @@ class SettingsViewModel @Inject constructor(
     fun setSensitiveNotificationsEnabled(enabled: Boolean) {
         preferences.sensitiveNotificationsEnabled = enabled
         _sensitiveNotificationsEnabled.value = enabled
+    }
+
+    // ── Contacts bypass ───────────────────────────────────────────────────────
+
+    private val _contactsBypassEnabled = MutableStateFlow(preferences.contactsBypassEnabled)
+    val contactsBypassEnabled: StateFlow<Boolean> = _contactsBypassEnabled.asStateFlow()
+
+    // Enabling registers the observer and triggers a sync if permission is already held.
+    // Disabling unregisters the observer and clears the Rust contact set.
+    // The OS permission (READ_CONTACTS) is never revoked — that is the user's choice.
+    // Permission acquisition on enable is handled in SettingsScreen before calling this.
+    fun setContactsBypassEnabled(enabled: Boolean) {
+        preferences.contactsBypassEnabled = enabled
+        _contactsBypassEnabled.value = enabled
+        if (enabled) {
+            contactsSyncManager.register()
+            contactsSyncManager.requestSyncIfNeeded()
+        } else {
+            contactsSyncManager.unregister()
+        }
     }
 
     // ── Backup & Restore ──────────────────────────────────────────────────────

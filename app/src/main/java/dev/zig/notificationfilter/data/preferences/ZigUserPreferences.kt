@@ -53,6 +53,14 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_SENSITIVE_NOTIFICATIONS, true)
         set(value) = prefs.edit().putBoolean(KEY_SENSITIVE_NOTIFICATIONS, value).apply()
 
+    // When true (default), ZiG whitelists notifications from senders whose names appear in
+    // the device contacts. Defaults to true so existing users who completed onboarding before
+    // this preference existed are unaffected. New users going through onboarding have this
+    // set explicitly in OnboardingViewModel.onContactsBypassResolved().
+    var contactsBypassEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CONTACTS_BYPASS_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_CONTACTS_BYPASS_ENABLED, value).apply()
+
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
         const val KEY_TERMS_ACCEPTED = "terms_accepted"
@@ -61,5 +69,6 @@ class ZigUserPreferences @Inject constructor(
         const val KEY_DEFAULT_RULES_SEEDED = "default_rules_seeded"
         const val KEY_SETUP_BANNER_DISMISSED = "setup_banner_dismissed"
         const val KEY_SENSITIVE_NOTIFICATIONS = "sensitive_notifications_enabled"
+        const val KEY_CONTACTS_BYPASS_ENABLED = "contacts_bypass_enabled"
     }
 }
