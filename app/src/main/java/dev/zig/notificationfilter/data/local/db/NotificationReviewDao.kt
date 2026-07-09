@@ -172,4 +172,18 @@ interface NotificationReviewDao {
     // the restore path — real notifications never carry it, so this cannot touch history.
     @Query("DELETE FROM notification_review WHERE systemDecision = 'RESTORED'")
     suspend fun deleteRestored()
+
+    // ── AI Memory reset ────────────────────────────────────────────────────────
+    // Wipes all learned state from the notification_review table: clears embeddings,
+    // resets user override decisions, and nulls category assignments. Demo rows
+    // (jobId 'demo-…') are excluded because they are seeded illustrations, not user data.
+    // The managed_app and keyword_rule tables are never referenced here.
+    @Query("""
+        UPDATE notification_review
+        SET embedding = NULL,
+            userOverrideStatus = 'NONE',
+            userAssignedCategory = NULL
+        WHERE jobId NOT LIKE 'demo-%'
+    """)
+    suspend fun clearAiMemory()
 }

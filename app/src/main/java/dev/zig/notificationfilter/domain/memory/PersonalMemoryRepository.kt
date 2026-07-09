@@ -57,6 +57,13 @@ class PersonalMemoryRepository @Inject constructor(
         invalidate()
     }
 
+    override suspend fun clearAllMemory() {
+        mutex.withLock {
+            dao.clearAiMemory()
+            cache = null
+        }
+    }
+
     private fun invalidate() {
         cache = null
     }

@@ -10,6 +10,7 @@ import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.backup.BackupRestoreManager
 import dev.zig.notificationfilter.domain.backup.IncompatibleBackupVersionException
+import dev.zig.notificationfilter.domain.memory.PersonalMemory
 import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,7 @@ class SettingsViewModel @Inject constructor(
     private val dailySummaryScheduler: DailySummaryScheduler,
     private val backupRestoreManager: BackupRestoreManager,
     private val contactsSyncManager: ContactsSyncManager,
+    private val personalMemory: PersonalMemory,
 ) : ViewModel() {
 
     private val _dailySummaryEnabled = MutableStateFlow(preferences.dailySummaryEnabled)
@@ -78,6 +80,26 @@ class SettingsViewModel @Inject constructor(
             contactsSyncManager.requestSyncIfNeeded()
         } else {
             contactsSyncManager.unregister()
+        }
+    }
+
+    // ── AI Memory reset ───────────────────────────────────────────────────────
+
+    private val _showClearMemoryDialog = MutableStateFlow(false)
+    val showClearMemoryDialog: StateFlow<Boolean> = _showClearMemoryDialog.asStateFlow()
+
+    fun requestClearAiMemory() { _showClearMemoryDialog.value = true }
+    fun dismissClearMemoryDialog() { _showClearMemoryDialog.value = false }
+
+    fun clearAiMemory() {
+        _showClearMemoryDialog.value = false
+        viewModelScope.launch {
+            try {
+                personalMemory.clearAllMemory()
+                _messages.send("AI memory cleared. The filter will start fresh from your rules.")
+            } catch (e: Exception) {
+                _messages.send("Failed to clear AI memory: ${e.message ?: "unknown error"}")
+            }
         }
     }
 

@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
@@ -255,11 +256,21 @@ private fun NotificationReviewScreen(
                         style = MaterialTheme.typography.titleLarge,
                     )
                 },
+                navigationIcon = {
+                    if (showArchive) {
+                        IconButton(onClick = onToggleArchive) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back to Notifications",
+                            )
+                        }
+                    }
+                },
                 actions = {
-                    TextButton(
-                        onClick = onToggleArchive,
-                    ) {
-                        Text(if (showArchive) "Active" else "Archive")
+                    if (!showArchive) {
+                        TextButton(onClick = onToggleArchive) {
+                            Text("Archive")
+                        }
                     }
                 },
             )

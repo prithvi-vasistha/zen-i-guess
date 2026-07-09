@@ -18,9 +18,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +73,7 @@ fun SettingsScreen(
     val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
     val contactsBypassEnabled by viewModel.contactsBypassEnabled.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
+    val showClearMemoryDialog by viewModel.showClearMemoryDialog.collectAsState()
 
     val context = LocalContext.current
 
@@ -190,6 +193,17 @@ fun SettingsScreen(
                         onClick = { showRestoreConfirm = true },
                     )
                 }
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SettingsSectionLabel("AI Data")
+                }
+                item {
+                    SettingsDestructiveActionRow(
+                        title = "Clear AI Memory",
+                        subtitle = "Reset all learned notification preferences",
+                        onClick = viewModel::requestClearAiMemory,
+                    )
+                }
             }
 
             if (isBusy) {
@@ -201,6 +215,32 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+
+    if (showClearMemoryDialog) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissClearMemoryDialog,
+            title = { Text("Clear AI Memory?") },
+            text = {
+                Text(
+                    "This will permanently delete all your trained AI decisions and reset the " +
+                        "filter to its default state. Your Managed Apps and Custom Rules Vault " +
+                        "will not be affected. This action cannot be undone.",
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = viewModel::clearAiMemory,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
+                ) { Text("Clear Memory") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissClearMemoryDialog) { Text("Cancel") }
+            },
+        )
     }
 
     if (showRestoreConfirm) {
@@ -455,6 +495,48 @@ private fun SettingsActionRow(
                 Text(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsDestructiveActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val errorColor = MaterialTheme.colorScheme.error
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp)),
+        color = errorColor.copy(alpha = 0.08f),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = null,
+                tint = errorColor,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = errorColor,
                 )
                 Text(
                     text = subtitle,

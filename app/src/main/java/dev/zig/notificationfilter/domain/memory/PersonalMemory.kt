@@ -28,4 +28,12 @@ interface PersonalMemory {
      * writes many override rows and their embeddings directly.
      */
     suspend fun reload()
+
+    /**
+     * Wipes all learned AI state: clears every embedding vector and resets every user override
+     * decision in the database, then invalidates the in-memory corpus cache. The next incoming
+     * notification will find an empty corpus and fall back to the base model and rules engine.
+     * Managed apps and keyword rules are never touched.
+     */
+    suspend fun clearAllMemory()
 }
