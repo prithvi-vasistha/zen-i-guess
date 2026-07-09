@@ -85,6 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -123,6 +124,25 @@ private enum class EffectiveCardAction {
     }
 }
 
+// ── Rule-match badge: immutable, deterministic verdicts (contact / keyword) ───
+// These rows were decided by a hardcoded rule, not the classifier, so they carry no
+// Allow/Block affordance — only a disabled read-only badge stating what the rule did.
+
+private enum class RuleBadge(val label: String) {
+    CONTACT_ALLOWED("✓ Contact Matched — Allowed"),
+    KEYWORD_ALLOWED("🛡️ Keyword Matched — Allowed"),
+    KEYWORD_BLOCKED("🛡️ Keyword Matched — Blocked");
+
+    companion object {
+        fun from(systemDecision: String): RuleBadge? = when (systemDecision) {
+            "CONTACT_PASS"    -> CONTACT_ALLOWED
+            "KEYWORD_PASS"    -> KEYWORD_ALLOWED
+            "KEYWORD_BLOCKED" -> KEYWORD_BLOCKED
+            else              -> null
+        }
+    }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 private val REVIEW_TIME_FORMATTER: DateTimeFormatter =
@@ -147,6 +167,12 @@ private fun SortDirection.displayLabel(sortField: SortField): String = when (sor
 
 private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
 
+private fun ChipFilter.displayLabel(): String = when (this) {
+    ChipFilter.ALL          -> "All"
+    ChipFilter.AI_DECISIONS -> "AI Decisions"
+    ChipFilter.BLOCKED      -> "Blocked"
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 @Composable
@@ -162,9 +188,21 @@ fun NotificationReviewRoute(
     val categoryOverrides by viewModel.categoryOverrides.collectAsState()
     val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val managedAppCount by viewModel.managedAppCount.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    // Allow/Block confirm the recorded decision with a one-shot snackbar. The VM cascades the
+    // decision to every identical notification; this only surfaces feedback to the user.
+    val onAllow: (Long) -> Unit = { id ->
+        viewModel.onAllowClicked(id)
+        scope.launch { snackbarHostState.showSnackbar("ZiG has recorded your preference.") }
+    }
+    val onBlockAndMute: (Long) -> Unit = { id ->
+        viewModel.onBlockAndMuteClicked(id)
+        scope.launch { snackbarHostState.showSnackbar("ZiG has recorded your preference.") }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refreshCompleted.collect {
@@ -200,15 +238,17 @@ fun NotificationReviewRoute(
         showArchive = showArchive,
         archiveDateFilter = archiveDateFilter,
         isRefreshing = isRefreshing,
+        managedAppCount = managedAppCount,
         snackbarHostState = snackbarHostState,
         onToggleArchive = { showArchive = !showArchive },
         onRefresh = viewModel::refresh,
         onQueryChange = viewModel::setQuery,
         onSortFieldChange = viewModel::setSortField,
         onSortDirectionChange = viewModel::setSortDirection,
+        onChipFilterChange = viewModel::setChipFilter,
         onArchiveDateFilterChange = viewModel::setArchiveDateFilter,
-        onAllowClicked = viewModel::onAllowClicked,
-        onBlockAndMuteClicked = viewModel::onBlockAndMuteClicked,
+        onAllowClicked = onAllow,
+        onBlockAndMuteClicked = onBlockAndMute,
         onSetCategoryOverride = viewModel::setCategoryOverride,
         onSetUserCategory = viewModel::setUserAssignedCategory,
         onDismiss = onDismiss,
@@ -230,12 +270,14 @@ private fun NotificationReviewScreen(
     showArchive: Boolean,
     archiveDateFilter: LocalDate?,
     isRefreshing: Boolean,
+    managedAppCount: Int,
     snackbarHostState: SnackbarHostState,
     onToggleArchive: () -> Unit,
     onRefresh: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSortFieldChange: (SortField) -> Unit,
     onSortDirectionChange: (SortDirection) -> Unit,
+    onChipFilterChange: (ChipFilter) -> Unit,
     onArchiveDateFilterChange: (LocalDate?) -> Unit,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
@@ -336,6 +378,21 @@ private fun NotificationReviewScreen(
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                ChipFilter.entries.forEach { chip ->
+                    FilterChip(
+                        selected = filter.chipFilter == chip,
+                        onClick = { onChipFilterChange(chip) },
+                        label = { Text(chip.displayLabel(), style = MaterialTheme.typography.labelMedium) },
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 SortFieldMenu(
                     current = filter.sortField,
                     onSelect = onSortFieldChange,
@@ -384,6 +441,7 @@ private fun NotificationReviewScreen(
                             packageLabels = packageLabels,
                             appIcons = appIcons,
                             categoryOverrides = categoryOverrides,
+                            managedAppCount = managedAppCount,
                             onAllowClicked = onAllowClicked,
                             onBlockAndMuteClicked = onBlockAndMuteClicked,
                             onSetCategoryOverride = onSetCategoryOverride,
@@ -478,10 +536,9 @@ private fun SortFieldMenu(
     var expanded by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         OutlinedTextField(
-            value = current.displayLabel(),
+            value = "Sort: ${current.displayLabel()}",
             onValueChange = {},
             readOnly = true,
-            label = { Text("Sort by", style = MaterialTheme.typography.labelSmall) },
             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
             modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
@@ -521,10 +578,9 @@ private fun SortDirectionMenu(
     var expanded by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
         OutlinedTextField(
-            value = current.displayLabel(sortField),
+            value = "Order: ${current.displayLabel(sortField)}",
             onValueChange = {},
             readOnly = true,
-            label = { Text("Order", style = MaterialTheme.typography.labelSmall) },
             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
             modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
@@ -563,6 +619,7 @@ private fun ReviewListContent(
     packageLabels: Map<String, String>,
     appIcons: Map<String, ImageBitmap>,
     categoryOverrides: Map<String, String>,
+    managedAppCount: Int,
     onAllowClicked: (Long) -> Unit,
     onBlockAndMuteClicked: (Long) -> Unit,
     onSetCategoryOverride: (String, String?) -> Unit,
@@ -592,7 +649,26 @@ private fun ReviewListContent(
                 )
             }
         }
+        item(key = "feed_footer") {
+            FeedFooter(managedAppCount = managedAppCount)
+        }
     }
+}
+
+// Permanent, centered footer at the bottom of the inbox. Explains the monitored-apps scope
+// so an empty-looking feed reads as "nothing to review" rather than "notifications missing".
+@Composable
+private fun FeedFooter(managedAppCount: Int) {
+    Text(
+        text = "ZiG is currently monitoring $managedAppCount apps. To see the rest of your " +
+            "notifications, add them to ZiG.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 32.dp, vertical = 24.dp),
+    )
 }
 
 // ── "New notifications" indicator (inbox + archive) ───────────────────────────
@@ -928,13 +1004,17 @@ private fun ReviewItemCard(
     modifier: Modifier = Modifier,
     categoryChipModifier: Modifier = Modifier,
 ) {
+    // A deterministic rule (contact/keyword) decided this row — its verdict is immutable, so it
+    // renders a disabled read-only badge instead of Allow/Block. Null for classifier rows.
+    val ruleBadge = RuleBadge.from(item.systemDecision)
     val effectiveAction = EffectiveCardAction.from(item.systemDecision, item.userOverrideStatus)
 
     val containerColor by animateColorAsState(
-        targetValue = when (effectiveAction) {
-            EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.15f)
-            EffectiveCardAction.ALLOW_WITH_UNDO          -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
-            else                                         -> MaterialTheme.colorScheme.surface
+        targetValue = when {
+            ruleBadge != null                                      -> MaterialTheme.colorScheme.surface
+            effectiveAction == EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.15f)
+            effectiveAction == EffectiveCardAction.ALLOW_WITH_UNDO -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
+            else                                                   -> MaterialTheme.colorScheme.surface
         },
         animationSpec = tween(durationMillis = 300),
         label = "card_bg",
@@ -986,20 +1066,24 @@ private fun ReviewItemCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            AnimatedContent(
-                targetState = effectiveAction,
-                transitionSpec = {
-                    fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
-                },
-                label = "action_row",
-            ) { action ->
-                ActionRow(
-                    action = action,
-                    id = item.id,
-                    isPublishedRow = item.systemDecision == "PUBLISHED",
-                    onAllowClicked = onAllowClicked,
-                    onBlockAndMuteClicked = onBlockAndMuteClicked,
-                )
+            if (ruleBadge != null) {
+                ReadOnlyRuleBadge(badge = ruleBadge)
+            } else {
+                AnimatedContent(
+                    targetState = effectiveAction,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                    },
+                    label = "action_row",
+                ) { action ->
+                    ActionRow(
+                        action = action,
+                        id = item.id,
+                        isPublishedRow = item.systemDecision == "PUBLISHED",
+                        onAllowClicked = onAllowClicked,
+                        onBlockAndMuteClicked = onBlockAndMuteClicked,
+                    )
+                }
             }
         }
     }
@@ -1058,15 +1142,6 @@ private fun CategoryRow(
                 }
             }
         }
-
-        if (item.modelConfidence > 0f) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "P(block) ${"%.2f".format(item.modelConfidence)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            )
-        }
     }
 }
 
@@ -1107,6 +1182,31 @@ private fun ActionRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             )
         }
+    }
+}
+
+// ── Read-only rule badge ──────────────────────────────────────────────────────
+// A disabled, full-width Button (enabled = false) for rows decided by a deterministic
+// contact/keyword rule. It cannot be pressed or focused and uses M3 disabled color tokens,
+// signalling an immutable system action rather than a user-changeable decision.
+
+@Composable
+private fun ReadOnlyRuleBadge(
+    badge: RuleBadge,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Button(
+            onClick = {},
+            enabled = false,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(badge.label) }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Applied automatically by a rule — not counted as training signal",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
     }
 }
 

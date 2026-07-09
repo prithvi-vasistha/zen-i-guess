@@ -34,6 +34,7 @@ class EnsembleClassifierTest {
         override suspend fun rememberOverride(id: Long) = Unit
         override suspend fun forgetOverride(id: Long) = Unit
         override suspend fun reload() = Unit
+        override suspend fun clearAllMemory() = Unit
     }
 
     // getExactMatchOverride resolves against [overridesByKey] (key -> userOverrideStatus); every
@@ -69,6 +70,15 @@ class EnsembleClassifierTest {
         override suspend fun getAllOverrides(): List<NotificationReviewEntity> = emptyList()
         override suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long> = emptyList()
         override suspend fun deleteRestored() = Unit
+        override suspend fun clearAiMemory() = Unit
+        override suspend fun cascadeOverride(
+            packageName: String,
+            title: String,
+            content: String,
+            state: String,
+            status: String,
+            cutoff: Long,
+        ) = Unit
     }
 
     // Regression test for the messaging-app cache-key bug: the base model would ALLOW and the

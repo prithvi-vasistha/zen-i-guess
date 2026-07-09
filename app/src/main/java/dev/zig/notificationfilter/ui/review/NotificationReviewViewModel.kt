@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
+import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
@@ -70,6 +71,7 @@ sealed interface ReviewUiState {
 class NotificationReviewViewModel @Inject constructor(
     private val dao: NotificationReviewDao,
     private val overrideDao: AppCategoryOverrideDao,
+    private val managedAppDao: ManagedAppDao,
     private val personalMemory: PersonalMemory,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -79,6 +81,11 @@ class NotificationReviewViewModel @Inject constructor(
         private const val THIRTY_DAYS_MS = 30L * 24L * 60L * 60L * 1_000L
         private const val CUTOFF_REFRESH_INTERVAL_MS = 60L * 60L * 1_000L
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d")
+
+        // Chip-filter membership. AI_DECISIONS = rows the classifier decided (actionable);
+        // BLOCKED = anything silenced, whether by the model or a keyword rule.
+        private val AI_DECISION_SET = setOf("MODEL_BLOCKED", "PUBLISHED", "LLM_BLOCKED")
+        private val BLOCKED_SET = setOf("MODEL_BLOCKED", "LLM_BLOCKED", "KEYWORD_BLOCKED")
     }
 
     // ── Filter state ──────────────────────────────────────────────────────────
@@ -96,6 +103,10 @@ class NotificationReviewViewModel @Inject constructor(
 
     fun setSortDirection(sortDirection: SortDirection) {
         _filter.value = _filter.value.copy(sortDirection = sortDirection)
+    }
+
+    fun setChipFilter(chipFilter: ChipFilter) {
+        _filter.value = _filter.value.copy(chipFilter = chipFilter)
     }
 
     private val _archiveDateFilter = MutableStateFlow<LocalDate?>(null)
@@ -147,7 +158,11 @@ class NotificationReviewViewModel @Inject constructor(
         Pair(cutoff, filter)
     }.flatMapLatest { (cutoff, filter) ->
         dao.searchActiveFlow(cutoff, filter.query)
-            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toReviewUiState() }
+            .map { list ->
+                list.applyChipFilter(filter.chipFilter)
+                    .applySort(filter.sortField, filter.sortDirection)
+                    .toReviewUiState()
+            }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -165,7 +180,11 @@ class NotificationReviewViewModel @Inject constructor(
         Pair(cutoff, filter)
     }.flatMapLatest { (cutoff, filter) ->
         dao.searchArchiveFlow(cutoff, filter.query)
-            .map { list -> list.applySort(filter.sortField, filter.sortDirection).toDateGroupedUiState() }
+            .map { list ->
+                list.applyChipFilter(filter.chipFilter)
+                    .applySort(filter.sortField, filter.sortDirection)
+                    .toDateGroupedUiState()
+            }
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -194,6 +213,18 @@ class NotificationReviewViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyMap(),
+        )
+
+    // ── Managed-apps count ────────────────────────────────────────────────────
+    // Drives the feed footer ("ZiG is currently monitoring X apps…"). Reflects the
+    // number of apps the user has opted into filtering.
+
+    val managedAppCount: StateFlow<Int> = managedAppDao.getAll()
+        .map { it.size }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0,
         )
 
     // ── Init: resolve labels for any packages that appear in either list ──────
@@ -255,19 +286,29 @@ class NotificationReviewViewModel @Inject constructor(
 
     // ── User actions ──────────────────────────────────────────────────────────
 
-    fun onAllowClicked(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
-            dao.updateReviewState(id, ReviewState.ALLOWED.name)
-            dao.updateOverrideStatus(id, "MANUALLY_ALLOWED")
-            // Status written first: rememberOverride reads it back to label the embedding.
-            personalMemory.rememberOverride(id)
-        }
-    }
+    fun onAllowClicked(id: Long) = cascadeDecision(id, ReviewState.ALLOWED, "MANUALLY_ALLOWED")
 
-    fun onBlockAndMuteClicked(id: Long) {
+    fun onBlockAndMuteClicked(id: Long) = cascadeDecision(id, ReviewState.BLOCKED, "MANUALLY_BLOCKED")
+
+    // Cascading state synchronisation: one tap applies the decision to every identical
+    // notification (same package/title/content) inside the active 24-hour window via a single
+    // bulk UPDATE. The DB Flow re-emits, so all matching cards update at once — no separate
+    // in-memory list to keep in sync. Only the tapped row is embedded into Personal Memory so
+    // the KNN corpus doesn't accumulate duplicate vectors for the same text.
+    private fun cascadeDecision(id: Long, state: ReviewState, overrideStatus: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            dao.updateReviewState(id, ReviewState.BLOCKED.name)
-            dao.updateOverrideStatus(id, "MANUALLY_BLOCKED")
+            val row = dao.getById(id) ?: return@launch
+            val cutoff = System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS
+            dao.cascadeOverride(
+                packageName = row.packageName,
+                title = row.title,
+                content = row.content,
+                state = state.name,
+                status = overrideStatus,
+                cutoff = cutoff,
+            )
+            // Status written first (by the cascade): rememberOverride reads it back to label
+            // the embedding.
             personalMemory.rememberOverride(id)
         }
     }
@@ -321,6 +362,16 @@ class NotificationReviewViewModel @Inject constructor(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // Restricts the emitted list to the selected quick-filter chip. Applied before sorting
+    // and grouping. ALL is a no-op passthrough.
+    private fun List<NotificationReviewEntity>.applyChipFilter(
+        chip: ChipFilter,
+    ): List<NotificationReviewEntity> = when (chip) {
+        ChipFilter.ALL          -> this
+        ChipFilter.AI_DECISIONS -> filter { it.systemDecision in AI_DECISION_SET }
+        ChipFilter.BLOCKED      -> filter { it.systemDecision in BLOCKED_SET }
+    }
 
     private fun List<NotificationReviewEntity>.applySort(
         sortField: SortField,
