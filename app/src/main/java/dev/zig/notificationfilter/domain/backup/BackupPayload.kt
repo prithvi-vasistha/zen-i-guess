@@ -64,6 +64,8 @@ data class CategoryOverrideEntry(
 @Serializable
 data class BackupPreferences(
     @SerialName("daily_summary_enabled") val dailySummaryEnabled: Boolean,
+    @SerialName("daily_summary_hour") val dailySummaryHour: Int = 20,
+    @SerialName("daily_summary_minute") val dailySummaryMinute: Int = 0,
     @SerialName("sensitive_notifications_enabled") val sensitiveNotificationsEnabled: Boolean,
 )
 

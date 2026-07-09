@@ -31,10 +31,26 @@ class SettingsViewModel @Inject constructor(
     private val _dailySummaryEnabled = MutableStateFlow(preferences.dailySummaryEnabled)
     val dailySummaryEnabled: StateFlow<Boolean> = _dailySummaryEnabled.asStateFlow()
 
+    private val _dailySummaryHour = MutableStateFlow(preferences.dailySummaryHour)
+    val dailySummaryHour: StateFlow<Int> = _dailySummaryHour.asStateFlow()
+
+    private val _dailySummaryMinute = MutableStateFlow(preferences.dailySummaryMinute)
+    val dailySummaryMinute: StateFlow<Int> = _dailySummaryMinute.asStateFlow()
+
     fun setDailySummaryEnabled(enabled: Boolean) {
         preferences.dailySummaryEnabled = enabled
         _dailySummaryEnabled.value = enabled
         if (enabled) dailySummaryScheduler.schedule() else dailySummaryScheduler.cancel()
+    }
+
+    fun setSummaryTime(hour: Int, minute: Int) {
+        preferences.dailySummaryHour = hour
+        preferences.dailySummaryMinute = minute
+        _dailySummaryHour.value = hour
+        _dailySummaryMinute.value = minute
+        // Only reschedule the running job when the summary is active. If disabled, the
+        // stored time is read from preferences when the user next enables the toggle.
+        if (preferences.dailySummaryEnabled) dailySummaryScheduler.reschedule()
     }
 
     private val _sensitiveNotificationsEnabled = MutableStateFlow(preferences.sensitiveNotificationsEnabled)
@@ -106,6 +122,8 @@ class SettingsViewModel @Inject constructor(
                 val result = backupRestoreManager.restoreBackup(stream)
                 // Reflect restored preference values in the toggles immediately.
                 _dailySummaryEnabled.value = preferences.dailySummaryEnabled
+                _dailySummaryHour.value = preferences.dailySummaryHour
+                _dailySummaryMinute.value = preferences.dailySummaryMinute
                 _sensitiveNotificationsEnabled.value = preferences.sensitiveNotificationsEnabled
                 _messages.send(
                     "Restore complete: +${result.managedAppsAdded} apps, " +

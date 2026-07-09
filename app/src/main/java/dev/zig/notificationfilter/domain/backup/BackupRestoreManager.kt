@@ -129,11 +129,14 @@ class BackupRestoreManager @Inject constructor(
             throw IncompatibleBackupVersionException(payload.version)
         }
 
-        // 1. Preferences. Re-run the daily-summary scheduler side-effect so the WorkManager
-        //    job matches the imported toggle (writing the flag alone would leave them drifted).
+        // 1. Preferences. Write time first so reschedule() reads the restored values.
         preferences.dailySummaryEnabled = payload.preferences.dailySummaryEnabled
+        preferences.dailySummaryHour = payload.preferences.dailySummaryHour
+        preferences.dailySummaryMinute = payload.preferences.dailySummaryMinute
         preferences.sensitiveNotificationsEnabled = payload.preferences.sensitiveNotificationsEnabled
-        if (payload.preferences.dailySummaryEnabled) dailySummaryScheduler.schedule()
+        // reschedule() (CANCEL_AND_REENQUEUE) rather than schedule() (KEEP) so the restored
+        // time is picked up even if a job was already running at the old time.
+        if (payload.preferences.dailySummaryEnabled) dailySummaryScheduler.reschedule()
         else dailySummaryScheduler.cancel()
 
         // 2. Managed apps (merge). INSERT IGNORE dedupes by packageName; the Rust engine is the

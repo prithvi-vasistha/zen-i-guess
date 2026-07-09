@@ -22,6 +22,14 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_DAILY_SUMMARY, true)
         set(value) = prefs.edit().putBoolean(KEY_DAILY_SUMMARY, value).apply()
 
+    var dailySummaryHour: Int
+        get() = prefs.getInt(KEY_DAILY_SUMMARY_HOUR, 20)
+        set(value) = prefs.edit().putInt(KEY_DAILY_SUMMARY_HOUR, value).apply()
+
+    var dailySummaryMinute: Int
+        get() = prefs.getInt(KEY_DAILY_SUMMARY_MINUTE, 0)
+        set(value) = prefs.edit().putInt(KEY_DAILY_SUMMARY_MINUTE, value).apply()
+
     var termsAccepted: Boolean
         get() = prefs.getBoolean(KEY_TERMS_ACCEPTED, false)
         set(value) = prefs.edit().putBoolean(KEY_TERMS_ACCEPTED, value).apply()
@@ -63,6 +71,8 @@ class ZigUserPreferences @Inject constructor(
 
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
+        const val KEY_DAILY_SUMMARY_HOUR = "daily_summary_hour"
+        const val KEY_DAILY_SUMMARY_MINUTE = "daily_summary_minute"
         const val KEY_TERMS_ACCEPTED = "terms_accepted"
         const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
         const val KEY_DEMO_SEEDED = "demo_seeded"

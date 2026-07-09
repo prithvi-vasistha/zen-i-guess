@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +17,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -32,7 +34,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,15 +44,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.ui.theme.ZigGreen
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,14 +67,14 @@ fun SettingsScreen(
 ) {
     val viewModel: SettingsViewModel = hiltViewModel()
     val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
+    val dailySummaryHour by viewModel.dailySummaryHour.collectAsState()
+    val dailySummaryMinute by viewModel.dailySummaryMinute.collectAsState()
     val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
     val contactsBypassEnabled by viewModel.contactsBypassEnabled.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
 
     val context = LocalContext.current
 
-    // Launched when the user enables the contacts bypass without READ_CONTACTS being granted.
-    // If granted, the ViewModel enables and registers the observer; if denied, no-op (toggle stays off).
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -73,24 +82,20 @@ fun SettingsScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    // One-shot results from export/import land here as a Snackbar.
     LaunchedEffect(Unit) {
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    // SAF export: the system creates a new document; on return we write the backup to it.
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri -> uri?.let(viewModel::exportTo) }
 
-    // SAF import: the system lets the user pick an existing JSON; we read the backup from it.
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(viewModel::importFrom) }
 
-    // Restore replaces preferences and the restored-memory set, so confirm the intent
-    // before opening the file picker.
     var showRestoreConfirm by remember { mutableStateOf(false) }
+    var showDailySummaryDetail by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -113,101 +118,102 @@ fun SettingsScreen(
             )
         },
     ) { innerPadding ->
-        Box(modifier = Modifier
-            .fillMaxSize()
-            .padding(innerPadding),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
         ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                SettingsSectionLabel("Notifications")
-            }
-            item {
-                SettingsToggleRow(
-                    title = "Daily Summary",
-                    subtitle = "8 PM recap notification",
-                    checked = dailySummaryEnabled,
-                    onCheckedChange = viewModel::setDailySummaryEnabled,
-                )
-            }
-            item {
-                SettingsToggleRow(
-                    title = "Sensitive notifications",
-                    subtitle = "Show instantly on lock screen (skip filtering)",
-                    checked = sensitiveNotificationsEnabled,
-                    onCheckedChange = viewModel::setSensitiveNotificationsEnabled,
-                )
-            }
-            item {
-                SettingsToggleRow(
-                    title = "Smart Contact Bypass",
-                    subtitle = "Automatically allow notifications from your contacts",
-                    checked = contactsBypassEnabled,
-                    onCheckedChange = { enabled ->
-                        if (!enabled) {
-                            viewModel.setContactsBypassEnabled(false)
-                        } else {
-                            val hasPermission = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.READ_CONTACTS,
-                            ) == PackageManager.PERMISSION_GRANTED
-                            if (hasPermission) {
-                                viewModel.setContactsBypassEnabled(true)
-                            } else {
-                                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-                            }
-                        }
-                    },
-                )
-            }
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                SettingsSectionLabel("Backup")
-            }
-            item {
-                SettingsActionRow(
-                    title = "Export backup",
-                    subtitle = "Save settings & learned decisions to a file",
-                    icon = Icons.Default.Lock,
-                    enabled = !isBusy,
-                    onClick = { exportLauncher.launch("zig-backup.json") },
-                )
-            }
-            item {
-                SettingsActionRow(
-                    title = "Restore backup",
-                    subtitle = "Import settings & decisions from a file",
-                    icon = Icons.Default.Refresh,
-                    enabled = !isBusy,
-                    onClick = { showRestoreConfirm = true },
-                )
-            }
-            item {
-                Spacer(modifier = Modifier.height(4.dp))
-                SettingsSectionLabel("App")
-            }
-            item {
-                SettingsActionRow(
-                    title = "Replay tour",
-                    subtitle = "Walk through ZiG's features again",
-                    icon = Icons.Default.Refresh,
-                    enabled = !isBusy,
-                    onClick = onRestartTour,
-                )
-            }
-        }
-
-        // Blocks interaction and shows progress while an export/import runs.
-        if (isBusy) {
-            Box(
+            LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CircularProgressIndicator()
+                item {
+                    SettingsSectionLabel("Notifications")
+                }
+                item {
+                    DailySummarySettingRow(
+                        checked = dailySummaryEnabled,
+                        hour = dailySummaryHour,
+                        minute = dailySummaryMinute,
+                        onToggle = viewModel::setDailySummaryEnabled,
+                        onRowClick = { showDailySummaryDetail = true },
+                    )
+                }
+                item {
+                    SettingsToggleRow(
+                        title = "Sensitive notifications",
+                        subtitle = "Show instantly on lock screen (skip filtering)",
+                        checked = sensitiveNotificationsEnabled,
+                        onCheckedChange = viewModel::setSensitiveNotificationsEnabled,
+                    )
+                }
+                item {
+                    SettingsToggleRow(
+                        title = "Smart Contact Bypass",
+                        subtitle = "Automatically allow notifications from your contacts",
+                        checked = contactsBypassEnabled,
+                        onCheckedChange = { enabled ->
+                            if (!enabled) {
+                                viewModel.setContactsBypassEnabled(false)
+                            } else {
+                                val hasPermission = ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.READ_CONTACTS,
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (hasPermission) {
+                                    viewModel.setContactsBypassEnabled(true)
+                                } else {
+                                    contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                                }
+                            }
+                        },
+                    )
+                }
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SettingsSectionLabel("Backup")
+                }
+                item {
+                    SettingsActionRow(
+                        title = "Export backup",
+                        subtitle = "Save settings & learned decisions to a file",
+                        icon = Icons.Default.Lock,
+                        enabled = !isBusy,
+                        onClick = { exportLauncher.launch("zig-backup.json") },
+                    )
+                }
+                item {
+                    SettingsActionRow(
+                        title = "Restore backup",
+                        subtitle = "Import settings & decisions from a file",
+                        icon = Icons.Default.Refresh,
+                        enabled = !isBusy,
+                        onClick = { showRestoreConfirm = true },
+                    )
+                }
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    SettingsSectionLabel("App")
+                }
+                item {
+                    SettingsActionRow(
+                        title = "Replay tour",
+                        subtitle = "Walk through ZiG's features again",
+                        icon = Icons.Default.Refresh,
+                        enabled = !isBusy,
+                        onClick = onRestartTour,
+                    )
+                }
             }
-        }
+
+            if (isBusy) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
         }
     }
 
@@ -234,6 +240,101 @@ fun SettingsScreen(
             },
         )
     }
+
+    if (showDailySummaryDetail) {
+        DailySummaryDetailScreen(
+            enabled = dailySummaryEnabled,
+            hour = dailySummaryHour,
+            minute = dailySummaryMinute,
+            onBack = { showDailySummaryDetail = false },
+            onToggle = viewModel::setDailySummaryEnabled,
+            onTimeConfirm = { h, m ->
+                viewModel.setSummaryTime(h, m)
+                showDailySummaryDetail = false
+            },
+        )
+    }
+}
+
+// Full-screen dialog that owns both the enable toggle and the clock picker.
+// The toggle takes effect immediately; the clock is confirmed with "Save time" which
+// also closes the screen. The back button closes without saving a pending time change.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DailySummaryDetailScreen(
+    enabled: Boolean,
+    hour: Int,
+    minute: Int,
+    onBack: () -> Unit,
+    onToggle: (Boolean) -> Unit,
+    onTimeConfirm: (Int, Int) -> Unit,
+) {
+    val timePickerState = rememberTimePickerState(
+        initialHour = hour,
+        initialMinute = minute,
+        is24Hour = false,
+    )
+
+    Dialog(
+        onDismissRequest = onBack,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Daily Summary") },
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                )
+                            }
+                        },
+                    )
+                },
+            ) { innerPadding ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    SettingsToggleRow(
+                        title = "Enable",
+                        subtitle = if (enabled) "Daily recap notification is active"
+                                   else "Daily recap notification is paused",
+                        checked = enabled,
+                        onCheckedChange = onToggle,
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    SettingsSectionLabel("Notification time")
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TimePicker(state = timePickerState)
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Button(
+                        onClick = { onTimeConfirm(timePickerState.hour, timePickerState.minute) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Save time")
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -242,8 +343,59 @@ private fun SettingsSectionLabel(label: String) {
         text = label,
         style = MaterialTheme.typography.labelMedium,
         color = ZigGreen,
-        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
     )
+}
+
+// Tapping the Switch directly toggles the feature on/off (onToggle).
+// Tapping anywhere else on the row opens the detail screen (onRowClick).
+// Compose routes the events correctly: Switch consumes its own pointer event so
+// the Surface's onClick does not fire when the thumb is tapped.
+@Composable
+private fun DailySummarySettingRow(
+    checked: Boolean,
+    hour: Int,
+    minute: Int,
+    onToggle: (Boolean) -> Unit,
+    onRowClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val timeLabel = remember(hour, minute) {
+        val formatter = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+        LocalTime.of(hour, minute).format(formatter)
+    }
+    Surface(
+        onClick = onRowClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp)),
+        color = ZigGreen.copy(alpha = 0.08f),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Daily Summary",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = "Daily recap at $timeLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onToggle,
+            )
+        }
+    }
 }
 
 @Composable
