@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,16 +58,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -528,6 +536,24 @@ private fun ContactsBypassDialog(
 
 // ── App picker bottom sheet ───────────────────────────────────────────────────
 
+// Loads the launcher icon for [packageName] asynchronously on IO so the list
+// never blocks the main thread. Returns null while loading; the caller shows a
+// letter-initial placeholder until the real icon arrives.
+@Composable
+private fun rememberAppIconPainter(packageName: String): BitmapPainter? {
+    val context = LocalContext.current
+    return produceState<BitmapPainter?>(initialValue = null, packageName) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                val drawable = context.packageManager.getApplicationIcon(packageName)
+                BitmapPainter(drawable.toBitmap().asImageBitmap())
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }.value
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppPickerSheet(
@@ -589,21 +615,32 @@ private fun AppPickerSheet(
                         )
                     },
                     leadingContent = {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    shape = CircleShape,
-                                ),
-                        ) {
-                            Text(
-                                text = app.label.first().uppercaseChar().toString(),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        val icon = rememberAppIconPainter(app.packageName)
+                        if (icon != null) {
+                            Image(
+                                painter = icon,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)),
                             )
+                        } else {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = CircleShape,
+                                    ),
+                            ) {
+                                Text(
+                                    text = app.label.first().uppercaseChar().toString(),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
                         }
                     },
                     modifier = Modifier.clickable { onAppSelected(app.packageName) },
