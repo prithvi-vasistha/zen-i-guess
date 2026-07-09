@@ -38,12 +38,6 @@ class DefaultRuleSeeder @Inject constructor(
         val DEFAULT_RULES: List<List<String>> = listOf(
             listOf("otp"),
             listOf("verification code"),
-            listOf("has been credited"),
-            listOf("has been debited"),
-            listOf("has been delivered"),
-            // A chained (AND) rule: the notification must contain BOTH terms. Seeded so users
-            // see how comma-separated chaining works out of the box — e.g. a ride's arrival
-            // alert ("Your cab is arriving") passes, while either word alone does not.
             listOf("cab", "arriving"),
         )
     }

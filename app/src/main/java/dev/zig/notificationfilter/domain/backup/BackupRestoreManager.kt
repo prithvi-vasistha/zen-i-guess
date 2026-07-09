@@ -5,6 +5,7 @@ import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
+import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
@@ -83,6 +84,7 @@ class BackupRestoreManager @Inject constructor(
      * to [outputStream]. The stream is closed on completion. Runs off the main thread.
      */
     suspend fun createBackup(outputStream: OutputStream) = withContext(Dispatchers.IO) {
+        val keywordSnapshot = keywordRuleDao.getAllSnapshot()
         val payload = BackupPayload(
             exportDate = System.currentTimeMillis() / 1000,
             preferences = BackupPreferences(
@@ -90,7 +92,10 @@ class BackupRestoreManager @Inject constructor(
                 sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
             ),
             managedApps = managedAppDao.getAllPackageNames(),
-            keywordRules = keywordRuleDao.getAllSnapshot().map { it.conditions },
+            keywordRules = keywordSnapshot.map { it.conditions },
+            keywordRulesV2 = keywordSnapshot.map {
+                KeywordRuleBackupEntry(it.conditions, it.ruleType)
+            },
             categoryOverrides = categoryOverrideDao.getAllSnapshot().map {
                 CategoryOverrideEntry(it.packageName, it.defaultCategory)
             },
@@ -141,19 +146,34 @@ class BackupRestoreManager @Inject constructor(
             if (pkg !in existingApps) managedAppsAdded++
         }
 
-        // 3. Keyword rules (merge, de-duplicated by their condition list). After writing, rebuild
-        //    the Rust keyword set from the full Room snapshot so it reflects the merged rules.
-        val existingRules = keywordRuleDao.getAllSnapshot().map { it.conditions }.toMutableSet()
+        // 3. Keyword rules (merge, de-duplicated by condition list + type).
+        //    v3 backups carry keywordRulesV2 with explicit ALLOW/BLOCK types; v2 backups carry
+        //    only keywordRules (all treated as ALLOW for backward compatibility).
+        val typedEntries: List<KeywordRuleBackupEntry> = if (payload.keywordRulesV2.isNotEmpty()) {
+            payload.keywordRulesV2
+        } else {
+            payload.keywordRules.map { KeywordRuleBackupEntry(it, KeywordRuleType.ALLOW.name) }
+        }
+        val existingRules = keywordRuleDao.getAllSnapshot()
+            .map { it.conditions to it.ruleType }.toMutableSet()
         var keywordRulesAdded = 0
-        payload.keywordRules.forEach { conditions ->
-            if (conditions.isNotEmpty() && existingRules.add(conditions)) {
-                keywordRuleDao.insert(KeywordRuleEntity(conditions = conditions))
+        typedEntries.forEach { entry ->
+            val key = entry.conditions to entry.ruleType
+            if (entry.conditions.isNotEmpty() && existingRules.add(key)) {
+                keywordRuleDao.insert(KeywordRuleEntity(conditions = entry.conditions, ruleType = entry.ruleType))
                 keywordRulesAdded++
             }
         }
+        // Rebuild both Rust sets from the merged Room snapshot.
         NativeBridge.clearKeywordWhitelist()
+        NativeBridge.clearKeywordBlocklist()
         keywordRuleDao.getAllSnapshot().forEach { rule ->
-            NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
+            val joined = rule.conditions.joinToString("||")
+            if (rule.ruleType == KeywordRuleType.BLOCK.name) {
+                NativeBridge.addKeywordRuleToBlocklist(joined)
+            } else {
+                NativeBridge.addKeywordRuleToWhitelist(joined)
+            }
         }
 
         // 4. Category overrides (upsert — REPLACE by packageName).

@@ -220,10 +220,21 @@ class ZigNotificationListenerService : NotificationListenerService() {
         log(jobId, packageName, title, content, "CONTACT_MISS",
             "Title \"$title\" not in contact whitelist")
 
-        // Gate 3: keyword rules (Tier 2 — deterministic, bypasses classifier)
-        if (NativeBridge.containsWhitelistedKeyword(content)) {
+        // Gate 3: keyword blocklist (Tier 2a — deterministic, mute immediately)
+        // Checked before the allowlist so an explicit block always wins.
+        if (NativeBridge.containsBlocklistedKeyword(text)) {
+            log(jobId, packageName, title, content, "KEYWORD_BLOCKED",
+                "Body matched a blocked keyword rule — silenced")
+            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_BLOCKED", messageText = cacheKey)
+            return
+        }
+        log(jobId, packageName, title, content, "BLOCKLIST_MISS",
+            "No blocked keyword matched")
+
+        // Gate 4: keyword allowlist (Tier 2b — deterministic, pass immediately)
+        if (NativeBridge.containsWhitelistedKeyword(text)) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
-                "Body matched a keyword rule")
+                "Body matched an allowed keyword rule")
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
@@ -231,7 +242,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
-            "No keyword rule matched — escalating to on-device classifier")
+            "No allowed keyword matched — escalating to on-device classifier")
 
         // ── Phase 1 LLM lane (archived) ────────────────────────────────────────
         // val appName = try {

@@ -15,4 +15,7 @@ object NativeBridge {
     external fun addKeywordRuleToWhitelist(joinedKeywords: String)
     external fun clearKeywordWhitelist()
     external fun containsWhitelistedKeyword(content: String): Boolean
+    external fun addKeywordRuleToBlocklist(joinedKeywords: String)
+    external fun clearKeywordBlocklist()
+    external fun containsBlocklistedKeyword(content: String): Boolean
 }

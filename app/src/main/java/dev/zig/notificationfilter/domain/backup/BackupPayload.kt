@@ -16,14 +16,17 @@ import kotlinx.serialization.Serializable
  *
  * @property version           schema version. Bumped on a shape change so [BackupRestoreManager]
  *                             can refuse a file it cannot read. v2 added managedApps,
- *                             keywordRules and categoryOverrides; these default to empty so a
- *                             v1 file (which lacks them) still imports cleanly.
+ *                             keywordRules and categoryOverrides; v3 added keywordRulesV2
+ *                             carrying the rule type (ALLOW / BLOCK).
  * @property exportDate        Unix epoch seconds the file was written. Informational only.
  * @property preferences       the two genuine user-facing toggles. Internal lifecycle flags
  *                             (onboarding, seeding guards, terms) are intentionally excluded —
  *                             restoring them across devices would misfire onboarding/seeding.
  * @property managedApps       package names ZiG is filtering (the managed_app table).
- * @property keywordRules      each Rules-Vault rule as its list of keyword conditions.
+ * @property keywordRules      v1/v2 compat: each Rules-Vault rule as its list of keyword
+ *                             conditions (type information absent — treated as ALLOW on import).
+ * @property keywordRulesV2    v3+: each rule with its explicit [KeywordRuleBackupEntry.ruleType].
+ *                             Supersedes [keywordRules] when present.
  * @property categoryOverrides per-app default category assignments.
  * @property racMemory         every real manual override, as the classifier's memory corpus.
  */
@@ -34,14 +37,22 @@ data class BackupPayload(
     val preferences: BackupPreferences,
     @SerialName("managed_apps") val managedApps: List<String> = emptyList(),
     @SerialName("keyword_rules") val keywordRules: List<List<String>> = emptyList(),
+    @SerialName("keyword_rules_v2") val keywordRulesV2: List<KeywordRuleBackupEntry> = emptyList(),
     @SerialName("category_overrides") val categoryOverrides: List<CategoryOverrideEntry> = emptyList(),
     @SerialName("rac_memory") val racMemory: List<RacMemoryEntry>,
 ) {
     companion object {
         /** The schema version this build writes and is able to read. */
-        const val CURRENT_VERSION = 2
+        const val CURRENT_VERSION = 3
     }
 }
+
+/** A typed keyword rule entry used in [BackupPayload.keywordRulesV2] (v3+). */
+@Serializable
+data class KeywordRuleBackupEntry(
+    val conditions: List<String>,
+    @SerialName("rule_type") val ruleType: String = "ALLOW",
+)
 
 /** One app-level default-category assignment (the app_category_override table). */
 @Serializable

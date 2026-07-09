@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         NotificationReviewEntity::class,
         AppCategoryOverrideEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(StringListConverter::class, ReviewEnumConverters::class, FloatArrayConverter::class)
@@ -148,6 +148,16 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_notification_review_messageText` " +
                         "ON `notification_review` (`messageText`)"
+                )
+            }
+        }
+
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Two-way keyword rules: ALLOW (bypass → pass) and BLOCK (bypass → mute).
+                // Existing rows are all allow-rules by intent, so DEFAULT 'ALLOW' is safe.
+                db.execSQL(
+                    "ALTER TABLE `keyword_rule` ADD COLUMN `ruleType` TEXT NOT NULL DEFAULT 'ALLOW'"
                 )
             }
         }

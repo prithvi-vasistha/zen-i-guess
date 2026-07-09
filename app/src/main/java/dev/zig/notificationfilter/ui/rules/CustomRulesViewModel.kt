@@ -6,6 +6,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
+import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,21 +19,27 @@ class CustomRulesViewModel @Inject constructor(
     private val keywordRuleDao: KeywordRuleDao,
 ) : ViewModel() {
 
-    val rules: StateFlow<List<KeywordRuleEntity>> = keywordRuleDao.getAll()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList(),
-        )
+    val allowRules: StateFlow<List<KeywordRuleEntity>> =
+        keywordRuleDao.getByType(KeywordRuleType.ALLOW.name)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun addRule(rawInput: String) {
+    val blockRules: StateFlow<List<KeywordRuleEntity>> =
+        keywordRuleDao.getByType(KeywordRuleType.BLOCK.name)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun addRule(rawInput: String, type: KeywordRuleType) {
         val conditions = rawInput.split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
         if (conditions.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            keywordRuleDao.insert(KeywordRuleEntity(conditions = conditions))
-            NativeBridge.addKeywordRuleToWhitelist(conditions.joinToString("||"))
+            keywordRuleDao.insert(KeywordRuleEntity(conditions = conditions, ruleType = type.name))
+            val joined = conditions.joinToString("||")
+            if (type == KeywordRuleType.BLOCK) {
+                NativeBridge.addKeywordRuleToBlocklist(joined)
+            } else {
+                NativeBridge.addKeywordRuleToWhitelist(joined)
+            }
         }
     }
 
@@ -43,26 +50,28 @@ class CustomRulesViewModel @Inject constructor(
         if (conditions.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             keywordRuleDao.update(entity.copy(conditions = conditions))
-            // Rebuild Rust KEYWORD_WHITELIST from post-update snapshot — same pattern as deleteRule.
-            val remaining = keywordRuleDao.getAllSnapshot()
-            NativeBridge.clearKeywordWhitelist()
-            remaining.forEach { rule ->
-                NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
-            }
+            rebuildRustSet(entity.ruleType)
         }
     }
 
     fun deleteRule(entity: KeywordRuleEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             keywordRuleDao.delete(entity)
-            // Rebuild the Rust KEYWORD_WHITELIST from the post-delete Room snapshot.
-            // clear() + repopulate is the only safe way to remove a specific rule from
-            // a Vec without tracking per-rule indices across the JNI boundary.
-            val remaining = keywordRuleDao.getAllSnapshot()
+            rebuildRustSet(entity.ruleType)
+        }
+    }
+
+    // Clears and repopulates only the Rust set that changed. Avoids touching the opposite
+    // set so an ALLOW delete never disturbs in-flight BLOCK lookups and vice versa.
+    private suspend fun rebuildRustSet(ruleType: String) {
+        if (ruleType == KeywordRuleType.BLOCK.name) {
+            val remaining = keywordRuleDao.getSnapshotByType(KeywordRuleType.BLOCK.name)
+            NativeBridge.clearKeywordBlocklist()
+            remaining.forEach { NativeBridge.addKeywordRuleToBlocklist(it.conditions.joinToString("||")) }
+        } else {
+            val remaining = keywordRuleDao.getSnapshotByType(KeywordRuleType.ALLOW.name)
             NativeBridge.clearKeywordWhitelist()
-            remaining.forEach { rule ->
-                NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
-            }
+            remaining.forEach { NativeBridge.addKeywordRuleToWhitelist(it.conditions.joinToString("||")) }
         }
     }
 }

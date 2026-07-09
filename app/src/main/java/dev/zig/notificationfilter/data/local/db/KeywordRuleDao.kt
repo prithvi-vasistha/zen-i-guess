@@ -25,4 +25,10 @@ interface KeywordRuleDao {
 
     @Query("SELECT * FROM keyword_rule ORDER BY id ASC")
     suspend fun getAllSnapshot(): List<KeywordRuleEntity>
+
+    @Query("SELECT * FROM keyword_rule WHERE ruleType = :type ORDER BY id ASC")
+    fun getByType(type: String): Flow<List<KeywordRuleEntity>>
+
+    @Query("SELECT * FROM keyword_rule WHERE ruleType = :type ORDER BY id ASC")
+    suspend fun getSnapshotByType(type: String): List<KeywordRuleEntity>
 }

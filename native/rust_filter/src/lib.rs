@@ -7,6 +7,7 @@ use std::sync::{OnceLock, RwLock};
 static MANAGED_APPS: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
 static CONTACT_WHITELIST: OnceLock<RwLock<HashSet<String>>> = OnceLock::new();
 static KEYWORD_WHITELIST: OnceLock<RwLock<Vec<Vec<String>>>> = OnceLock::new();
+static KEYWORD_BLOCKLIST: OnceLock<RwLock<Vec<Vec<String>>>> = OnceLock::new();
 
 /// Returns the RwLock for the given set, initialising it on first access.
 fn init_set(
@@ -208,4 +209,71 @@ pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_c
         set.clear();
     }
     // write lock poisoned → skip silently; caller will repopulate from ContactsContract
+}
+
+// ── Keyword blocklist (chained AND rules, OR across rules) ───────────────────
+// Mirrors the whitelist structure exactly; a match here means immediate mute.
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_addKeywordRuleToBlocklist<
+    'local,
+>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    joined_keywords: JString<'local>,
+) {
+    let joined: String = match env.get_string(&joined_keywords) {
+        Ok(s) => s.into(),
+        Err(_) => return,
+    };
+    let conditions: Vec<String> = joined
+        .split("||")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase())
+        .collect();
+    if conditions.is_empty() {
+        return;
+    }
+    if let Ok(mut rules) = init_vec(&KEYWORD_BLOCKLIST).write() {
+        rules.push(conditions);
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_clearKeywordBlocklist<
+    'local,
+>(
+    _env: JNIEnv<'local>,
+    _class: JClass<'local>,
+) {
+    if let Ok(mut rules) = init_vec(&KEYWORD_BLOCKLIST).write() {
+        rules.clear();
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_dev_zig_notificationfilter_data_local_NativeBridge_containsBlocklistedKeyword<
+    'local,
+>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    content: JString<'local>,
+) -> jboolean {
+    let body: String = match env.get_string(&content) {
+        Ok(s) => s.into(),
+        Err(_) => return JNI_FALSE,
+    };
+    let body_lower = body.to_lowercase();
+    match init_vec(&KEYWORD_BLOCKLIST).read() {
+        Ok(rules) => {
+            if rules.iter().any(|rule| {
+                rule.iter().all(|kw| body_lower.contains(kw.as_str()))
+            }) {
+                JNI_TRUE
+            } else {
+                JNI_FALSE
+            }
+        }
+        Err(_) => JNI_FALSE, // lock poisoned — fail safe (do not mute on error)
+    }
 }

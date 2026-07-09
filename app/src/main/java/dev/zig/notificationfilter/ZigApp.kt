@@ -13,6 +13,7 @@ import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.DefaultRuleSeeder
 import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
+import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
@@ -56,7 +57,12 @@ class ZigApp : Application(), Configuration.Provider {
                 NativeBridge.addAppToManaged(pkg)
             }
             keywordRuleDao.getAllSnapshot().forEach { rule ->
-                NativeBridge.addKeywordRuleToWhitelist(rule.conditions.joinToString("||"))
+                val joined = rule.conditions.joinToString("||")
+                if (rule.ruleType == KeywordRuleType.BLOCK.name) {
+                    NativeBridge.addKeywordRuleToBlocklist(joined)
+                } else {
+                    NativeBridge.addKeywordRuleToWhitelist(joined)
+                }
             }
             // Insert the two sample notifications on first launch so the onboarding tour
             // has real cards to demonstrate Allow / Block / Undo and the category chip.
