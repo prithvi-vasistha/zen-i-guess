@@ -95,8 +95,6 @@ import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
 import dev.zig.notificationfilter.ui.theme.ZigOnGreen
-import dev.zig.notificationfilter.ui.tour.TourKeys
-import dev.zig.notificationfilter.ui.tour.coachMark
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -255,13 +253,11 @@ private fun NotificationReviewScreen(
                     Text(
                         text = if (showArchive) "Archive" else "Notifications",
                         style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.coachMark(TourKeys.TITLE_REVIEW),
                     )
                 },
                 actions = {
                     TextButton(
                         onClick = onToggleArchive,
-                        modifier = Modifier.coachMark(TourKeys.REVIEW_ARCHIVE),
                     ) {
                         Text(if (showArchive) "Active" else "Archive")
                     }
@@ -582,8 +578,6 @@ private fun ReviewListContent(
                     onSetUserCategory = onSetUserCategory,
                     // Inbox rows are swipe-to-dismiss; archive rows pass null (see below).
                     onDismiss = onDismiss,
-                    // Spotlight the very first card's category chip during the onboarding tour.
-                    spotlightFirstCategory = groupIndex == 0,
                 )
             }
         }
@@ -693,19 +687,13 @@ private fun AppGroupCard(
     onSetUserCategory: (Long, String?) -> Unit,
     // Non-null on the active inbox (enables swipe-to-dismiss); null on the archive.
     onDismiss: ((Long) -> Unit)? = null,
-    spotlightFirstCategory: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(true) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            // Tour: spotlight the whole first group card so both the app-level chip (header)
-            // and the per-notification chips fall inside the lit cut-out.
-            .then(
-                if (spotlightFirstCategory) Modifier.coachMark(TourKeys.REVIEW_CATEGORY) else Modifier,
-            ),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (currentOverride != null)
                 categoryChipColors(currentOverride).container

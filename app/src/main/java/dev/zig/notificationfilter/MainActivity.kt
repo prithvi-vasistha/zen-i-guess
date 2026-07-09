@@ -57,11 +57,8 @@ class MainActivity : ComponentActivity() {
                             onboardingCompleted = true
                         },
                     )
-                    // v3: interactive tour replaced by the onboarding checklist.
-                    // startTour is hardcoded false so existing users are unaffected.
                     else -> MainScreen(
                         startTab = startTab,
-                        startTour = false,
                     )
                 }
             }

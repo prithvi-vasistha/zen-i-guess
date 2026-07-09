@@ -65,8 +65,6 @@ import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
-import dev.zig.notificationfilter.ui.tour.TourKeys
-import dev.zig.notificationfilter.ui.tour.coachMark
 
 private val ALLOW_SUGGESTIONS = listOf("otp", "verification code", "password", "bank")
 private val BLOCK_SUGGESTIONS = listOf("promo", "discount", "offer", "sale", "crypto")
@@ -121,7 +119,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Column(modifier = Modifier.coachMark(TourKeys.TITLE_RULES)) {
+                Column {
                     Text(
                         text = "Custom Rules Vault",
                         style = MaterialTheme.typography.titleLarge,
@@ -218,8 +216,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 keyboardActions = KeyboardActions(onDone = { onSaveOrAdd() }),
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(focusRequester)
-                    .coachMark(TourKeys.RULES_INPUT),
+                    .focusRequester(focusRequester),
             )
             IconButton(onClick = { onSaveOrAdd() }) {
                 Icon(

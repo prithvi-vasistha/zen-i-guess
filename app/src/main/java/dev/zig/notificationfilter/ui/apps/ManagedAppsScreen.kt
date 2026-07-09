@@ -59,8 +59,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import dev.zig.notificationfilter.R
-import dev.zig.notificationfilter.ui.tour.TourKeys
-import dev.zig.notificationfilter.ui.tour.coachMark
 
 /**
  * Apps tab entry point. Hosts two views inside the same pager page — the list of
@@ -111,7 +109,7 @@ private fun ManagedAppsList(
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
                 title = {
-                    Column(modifier = Modifier.coachMark(TourKeys.TITLE_APPS)) {
+                    Column {
                         Text(
                             text = "Managed Apps",
                             style = MaterialTheme.typography.titleLarge,
@@ -214,8 +212,7 @@ private fun ManagedAppsList(
                 onClick = onAddClick,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-                    .coachMark(TourKeys.APPS_ADD_FAB),
+                    .padding(16.dp),
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = "Add apps")
             }

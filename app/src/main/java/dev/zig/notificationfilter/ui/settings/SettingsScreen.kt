@@ -62,7 +62,6 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onRestartTour: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val viewModel: SettingsViewModel = hiltViewModel()
@@ -189,19 +188,6 @@ fun SettingsScreen(
                         icon = Icons.Default.Refresh,
                         enabled = !isBusy,
                         onClick = { showRestoreConfirm = true },
-                    )
-                }
-                item {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    SettingsSectionLabel("App")
-                }
-                item {
-                    SettingsActionRow(
-                        title = "Replay tour",
-                        subtitle = "Walk through ZiG's features again",
-                        icon = Icons.Default.Refresh,
-                        enabled = !isBusy,
-                        onClick = onRestartTour,
                     )
                 }
             }
