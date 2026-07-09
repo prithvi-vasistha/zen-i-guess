@@ -29,7 +29,7 @@ fun MainScreen(
     startTab: Int = -1,
 ) {
     val pagerState = rememberPagerState(
-        initialPage = 0,
+        initialPage = ZigScreen.all.indexOf(ZigScreen.Apps),
         pageCount = { ZigScreen.all.size },
     )
     val coroutineScope = rememberCoroutineScope()

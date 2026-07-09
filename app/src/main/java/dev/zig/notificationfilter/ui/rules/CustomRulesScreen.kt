@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -91,7 +92,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
     val activeContainerColor = if (isAllowTab) ZigGreen.copy(alpha = 0.10f) else MaterialTheme.colorScheme.errorContainer
     val helperText = if (isAllowTab) "Words containing these will NEVER be blocked."
                      else "Words containing these will ALWAYS be silenced."
-    val inputPlaceholder = if (isAllowTab) "Allow keyword (comma to chain)" else "Block keyword (comma to chain)"
+    val inputPlaceholder = if (isAllowTab) "Type an absolute safety word..." else "Type a word to auto-silence..."
 
     // Suggestions: hide chips whose keyword is already present as a single condition in any rule.
     val usedKeywords = remember(activeRules) { activeRules.flatMap { it.conditions }.toSet() }
@@ -184,13 +185,15 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        // Helper microcopy — immediately under the tab so intent is obvious before the user types.
         Text(
             text = helperText,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             color = activeColor,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
         )
 
         // Manual input row
@@ -226,6 +229,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 )
             }
         }
+
 
         // Smart suggestion chips — tapping one adds it instantly and removes it from the row.
         if (visibleSuggestions.isNotEmpty()) {
