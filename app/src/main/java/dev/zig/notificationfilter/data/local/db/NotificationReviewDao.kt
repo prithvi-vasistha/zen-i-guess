@@ -217,4 +217,48 @@ interface NotificationReviewDao {
         WHERE jobId NOT LIKE 'demo-%'
     """)
     suspend fun clearAiMemory()
+
+    // ── Daily Review (Phase 3) ─────────────────────────────────────────────────
+    // Today's AI-evaluated notifications the user hasn't decided on yet — the source for the
+    // gamified flashcard training deck. AI decisions only (LLM_BLOCKED / MODEL_BLOCKED /
+    // PUBLISHED); deterministic rule matches are immutable and excluded. Only undecided rows
+    // (userOverrideStatus = 'NONE') so the deck represents "still needs your input" and reaches
+    // a true Inbox Zero. Demo rows are seeded illustrations, not user data, and are excluded.
+    // Returned as a one-shot snapshot (not a Flow) so applying decisions can't reshuffle the
+    // deck mid-swipe. Grouping/dedup happens in the ViewModel.
+    @Query("""
+        SELECT * FROM notification_review
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
+        AND userOverrideStatus = 'NONE'
+        AND timestamp >= :startOfDayMs
+        AND jobId NOT LIKE 'demo-%'
+        ORDER BY timestamp DESC
+    """)
+    suspend fun getTodayAiEvaluatedUndecided(startOfDayMs: Long): List<NotificationReviewEntity>
+
+    // Applies one Daily-Review swipe decision to every row in a deduplicated group at once
+    // (all the identical notifications the card collapsed). syncStatus is reset so the decision
+    // is re-exported to the training dataset, mirroring updateReviewState / cascadeOverride.
+    @Query("""
+        UPDATE notification_review
+        SET reviewState = :state, syncStatus = 'UNPROCESSED', userOverrideStatus = :status
+        WHERE id IN (:ids)
+    """)
+    suspend fun applyDecisionToIds(ids: List<Long>, state: String, status: String)
+
+    // Live count of DEDUPLICATED cards in today's training deck — drives the "Daily Review"
+    // call-to-action (banner on the inbox + button on the Train screen), which is hidden when
+    // this is 0. Same predicate as getTodayAiEvaluatedUndecided; the GROUP BY collapses identical
+    // notifications so the count matches the number of cards the user will actually swipe.
+    @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT packageName FROM notification_review
+            WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
+            AND userOverrideStatus = 'NONE'
+            AND timestamp >= :startOfDayMs
+            AND jobId NOT LIKE 'demo-%'
+            GROUP BY packageName, title, content
+        )
+    """)
+    fun countTodayAiUndecidedFlow(startOfDayMs: Long): Flow<Int>
 }

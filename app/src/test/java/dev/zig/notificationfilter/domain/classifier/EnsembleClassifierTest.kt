@@ -80,6 +80,9 @@ class EnsembleClassifierTest {
             cutoff: Long,
             tappedId: Long,
         ) = Unit
+        override suspend fun getTodayAiEvaluatedUndecided(startOfDayMs: Long): List<NotificationReviewEntity> = emptyList()
+        override suspend fun applyDecisionToIds(ids: List<Long>, state: String, status: String) = Unit
+        override fun countTodayAiUndecidedFlow(startOfDayMs: Long): Flow<Int> = emptyFlow()
     }
 
     // Regression test for the messaging-app cache-key bug: the base model would ALLOW and the

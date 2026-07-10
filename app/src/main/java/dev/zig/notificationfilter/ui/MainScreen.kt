@@ -1,5 +1,8 @@
 package dev.zig.notificationfilter.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Icon
@@ -11,12 +14,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import dev.zig.notificationfilter.ui.apps.ManagedAppsScreen
+import dev.zig.notificationfilter.ui.dailyreview.DailyReviewScreen
 import dev.zig.notificationfilter.ui.logs.LogsScreen
 import dev.zig.notificationfilter.ui.navigation.ZigScreen
 import dev.zig.notificationfilter.ui.review.NotificationReviewRoute
@@ -27,6 +35,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun MainScreen(
     startTab: Int = -1,
+    // Increments each time the daily-summary notification asks to open the review deck. A nonce
+    // (not a Boolean) so a repeat tap re-triggers the LaunchedEffect even if the flag was reset.
+    dailyReviewNonce: Int = 0,
 ) {
     val pagerState = rememberPagerState(
         initialPage = ZigScreen.all.indexOf(ZigScreen.Apps),
@@ -41,6 +52,20 @@ fun MainScreen(
             pagerState.scrollToPage(startTab)
         }
     }
+
+    // The Daily Review deck is a full-screen overlay above the pager (its horizontal swipe would
+    // otherwise fight the pager). Opened by the notification (nonce) or the in-app CTA.
+    var showDailyReview by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(dailyReviewNonce) {
+        if (dailyReviewNonce > 0) showDailyReview = true
+    }
+    val closeDailyReview: () -> Unit = {
+        showDailyReview = false
+        // "Back to Inbox": land on the Notifications feed.
+        coroutineScope.launch { pagerState.scrollToPage(ZigScreen.all.indexOf(ZigScreen.Review)) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
 
     Scaffold(
         bottomBar = {
@@ -85,7 +110,9 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding),
         ) { page ->
             when (ZigScreen.all[page]) {
-                ZigScreen.Review -> NotificationReviewRoute()
+                ZigScreen.Review -> NotificationReviewRoute(
+                    onStartDailyReview = { showDailyReview = true },
+                )
                 ZigScreen.Apps -> ManagedAppsScreen()
                 ZigScreen.Rules -> CustomRulesScreen()
                 ZigScreen.Settings -> SettingsScreen()
@@ -93,4 +120,14 @@ fun MainScreen(
             }
         }
     }
+
+        if (showDailyReview) {
+            // System back exits the deck rather than the app.
+            BackHandler(onBack = closeDailyReview)
+            DailyReviewScreen(
+                onDone = closeDailyReview,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    } // Box
 }

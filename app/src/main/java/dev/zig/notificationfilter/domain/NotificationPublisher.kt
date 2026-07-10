@@ -40,6 +40,8 @@ class NotificationPublisher @Inject constructor(
         const val EXTRA_ZIG_NOTIF_TO_DISMISS = "zig_notif_to_dismiss"
         const val EXTRA_NAVIGATE_TO = "zig_navigate_to"
         const val NAV_TARGET_REVIEW = "review"
+        // Tapping the daily summary opens the gamified Daily Review swipe deck (Phase 3).
+        const val NAV_TARGET_DAILY_REVIEW = "daily_review"
     }
 
     init {
@@ -157,7 +159,7 @@ class NotificationPublisher @Inject constructor(
             Intent().apply {
                 component = ComponentName(context.packageName, "${context.packageName}.MainActivity")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra(EXTRA_NAVIGATE_TO, NAV_TARGET_REVIEW)
+                putExtra(EXTRA_NAVIGATE_TO, NAV_TARGET_DAILY_REVIEW)
             },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )

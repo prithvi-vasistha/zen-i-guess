@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -57,6 +58,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -91,6 +93,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
 import androidx.compose.ui.res.painterResource
 import dev.zig.notificationfilter.R
@@ -146,6 +149,9 @@ private enum class RuleBadge(val label: String) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// How long the "Notification dismissed / Undo" snackbar stays before it auto-dismisses.
+private const val UNDO_SNACKBAR_TIMEOUT_MS = 1_500L
+
 private val REVIEW_TIME_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("MMM dd · HH:mm")
 
@@ -179,6 +185,7 @@ private fun ChipFilter.displayLabel(): String = when (this) {
 @Composable
 fun NotificationReviewRoute(
     modifier: Modifier = Modifier,
+    onStartDailyReview: () -> Unit = {},
 ) {
     val viewModel: NotificationReviewViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
@@ -190,6 +197,7 @@ fun NotificationReviewRoute(
     val archiveDateFilter by viewModel.archiveDateFilter.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val managedAppCount by viewModel.managedAppCount.collectAsState()
+    val todayReviewCount by viewModel.todayReviewCount.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -213,14 +221,18 @@ fun NotificationReviewRoute(
 
     // Swipe-to-dismiss on the inbox: soft-hide the row, then offer a one-tap Undo. The row
     // stays in the archive regardless, so an accidental dismiss loses nothing permanent.
+    // The Undo auto-dismisses after a short window (no persistent X): withTimeoutOrNull cancels
+    // showSnackbar on timeout, which removes the snackbar; an Undo tap within the window restores.
     val onDismiss: (Long) -> Unit = { id ->
         viewModel.onDismiss(id)
         scope.launch {
-            val result = snackbarHostState.showSnackbar(
-                message = "Notification dismissed",
-                actionLabel = "Undo",
-                withDismissAction = true,
-            )
+            val result = withTimeoutOrNull(UNDO_SNACKBAR_TIMEOUT_MS) {
+                snackbarHostState.showSnackbar(
+                    message = "Notification dismissed",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Indefinite,
+                )
+            }
             if (result == SnackbarResult.ActionPerformed) {
                 viewModel.onRestoreDismissed(id)
             }
@@ -240,6 +252,8 @@ fun NotificationReviewRoute(
         archiveDateFilter = archiveDateFilter,
         isRefreshing = isRefreshing,
         managedAppCount = managedAppCount,
+        todayReviewCount = todayReviewCount,
+        onStartDailyReview = onStartDailyReview,
         snackbarHostState = snackbarHostState,
         onToggleArchive = { showArchive = !showArchive },
         onRefresh = viewModel::refresh,
@@ -272,6 +286,8 @@ private fun NotificationReviewScreen(
     archiveDateFilter: LocalDate?,
     isRefreshing: Boolean,
     managedAppCount: Int,
+    todayReviewCount: Int,
+    onStartDailyReview: () -> Unit,
     snackbarHostState: SnackbarHostState,
     onToggleArchive: () -> Unit,
     onRefresh: () -> Unit,
@@ -423,6 +439,17 @@ private fun NotificationReviewScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
+            }
+
+            // Daily Review call-to-action. Only shown when there are cards to swipe today.
+            // Inbox gets a prominent banner; the Train sub-screen gets a plainer button.
+            if (todayReviewCount > 0) {
+                DailyReviewCta(
+                    count = todayReviewCount,
+                    prominent = !showArchive,
+                    onClick = onStartDailyReview,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
             }
 
             Box(modifier = Modifier.fillMaxSize()) {
@@ -662,6 +689,62 @@ private fun ReviewListContent(
     }
 }
 
+// Daily Review entry point. Prominent green banner on the inbox; a plainer outlined button on
+// the Train sub-screen. Both open the full-screen swipe deck via [onClick].
+@Composable
+private fun DailyReviewCta(
+    count: Int,
+    prominent: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val label = "Review today's $count AI ${if (count == 1) "decision" else "decisions"}"
+    if (prominent) {
+        Surface(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = ZigGreen,
+            contentColor = ZigOnGreen,
+            shadowElevation = 2.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Daily Review",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(text = label, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    text = "Start",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Start Daily Review · $count")
+        }
+    }
+}
+
 // Permanent, centered footer at the bottom of the inbox. Explains the monitored-apps scope
 // so an empty-looking feed reads as "nothing to review" rather than "notifications missing".
 @Composable
@@ -716,15 +799,22 @@ private fun NewNotificationsIndicator(
     val newCount = if (seenNewestTs < 0L) 0 else itemTimestamps.count { it > seenNewestTs }
 
     LaunchedEffect(newestTs, isAtTop) {
+        // Never seed or acknowledge against an empty list. The first composition frame is Loading
+        // (itemTimestamps empty, newestTs 0); anchoring the baseline there would make every real
+        // notification count as "new" once data arrives, and would fire a spurious reveal-scroll
+        // on the empty→real transition. Waiting for the first non-empty list fixes both.
+        if (itemTimestamps.isEmpty()) return@LaunchedEffect
         when {
-            seenNewestTs < 0L -> seenNewestTs = newestTs        // first load: acknowledge existing
+            seenNewestTs < 0L -> seenNewestTs = newestTs        // first real list: acknowledge existing
             isAtTop -> {
-                // At the top: reveal any newly-arrived card (LazyColumn otherwise keeps the old
-                // top item anchored, leaving the new one just off-screen above), then acknowledge.
+                // Pinned at the very top (offset 0): reveal any newly-arrived card — LazyColumn
+                // otherwise keeps the old top item anchored, leaving the new one just off-screen
+                // above — then acknowledge. Any non-zero scroll makes isAtTop false, so a user who
+                // has scrolled even slightly is never yanked upward; the pill handles it instead.
                 if (newestTs > seenNewestTs) listState.animateScrollToItem(0)
                 seenNewestTs = newestTs
             }
-            // Scrolled away: leave the marker so the pill reflects the growing backlog.
+            // Scrolled away: leave the marker so the pill reflects the genuine new-arrival backlog.
         }
     }
 

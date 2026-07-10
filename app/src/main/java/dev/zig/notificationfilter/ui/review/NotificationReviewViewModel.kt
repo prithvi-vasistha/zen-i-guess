@@ -151,6 +151,18 @@ class NotificationReviewViewModel @Inject constructor(
         _refreshSignal,
     ).map { System.currentTimeMillis() - THIRTY_DAYS_MS }
 
+    // Start-of-today epoch ms, recomputed on the same hourly tick so the day boundary rolls over
+    // without needing an exact-midnight alarm.
+    private val todayStartFlow = merge(
+        flow { while (true) { emit(Unit); delay(CUTOFF_REFRESH_INTERVAL_MS) } },
+        _refreshSignal,
+    ).map {
+        LocalDate.now(ZoneId.systemDefault())
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+    }
+
     // ── Active inbox ──────────────────────────────────────────────────────────
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -221,6 +233,19 @@ class NotificationReviewViewModel @Inject constructor(
 
     val managedAppCount: StateFlow<Int> = managedAppDao.getAll()
         .map { it.size }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = 0,
+        )
+
+    // ── Daily Review call-to-action ───────────────────────────────────────────
+    // Number of deduplicated cards in today's training deck. Drives the CTA banner (inbox) and
+    // the Train-screen button; both hide when this is 0.
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val todayReviewCount: StateFlow<Int> = todayStartFlow
+        .flatMapLatest { startOfDay -> dao.countTodayAiUndecidedFlow(startOfDay) }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),

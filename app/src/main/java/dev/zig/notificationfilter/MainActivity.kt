@@ -26,6 +26,10 @@ class MainActivity : ComponentActivity() {
     // Index of the tab to open on launch from a notification deep-link (-1 = default).
     private var startTab by mutableStateOf(-1)
 
+    // Bumped each time the daily-summary notification asks to open the review deck. Forwarded to
+    // MainScreen, which owns the overlay; a nonce (not a flag) so a repeat tap re-triggers it.
+    private var dailyReviewNonce by mutableStateOf(0)
+
     // First-run gate states — read from prefs before setContent so the very first
     // composition sees the correct values without a recomposition flash.
     private var termsAccepted by mutableStateOf(false)
@@ -39,6 +43,7 @@ class MainActivity : ComponentActivity() {
         termsAccepted = preferences.termsAccepted
         onboardingCompleted = preferences.onboardingCompleted
         startTab = resolveStartTab(intent)
+        if (resolveDailyReview(intent)) dailyReviewNonce++
         dismissNotificationIfRequested(intent)
         enableEdgeToEdge()
         setContent {
@@ -59,6 +64,7 @@ class MainActivity : ComponentActivity() {
                     )
                     else -> MainScreen(
                         startTab = startTab,
+                        dailyReviewNonce = dailyReviewNonce,
                     )
                 }
             }
@@ -70,6 +76,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         startTab = resolveStartTab(intent)
+        if (resolveDailyReview(intent)) dailyReviewNonce++
         dismissNotificationIfRequested(intent)
     }
 
@@ -93,6 +100,10 @@ class MainActivity : ComponentActivity() {
             else -> -1
         }
     }
+
+    private fun resolveDailyReview(intent: Intent?): Boolean =
+        intent?.getStringExtra(NotificationPublisher.EXTRA_NAVIGATE_TO) ==
+            NotificationPublisher.NAV_TARGET_DAILY_REVIEW
 
     private fun dismissNotificationIfRequested(intent: Intent?) {
         val notifId = intent?.getIntExtra(
