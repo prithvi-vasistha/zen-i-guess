@@ -155,6 +155,12 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // message reproduces the same key. For non-messaging notifications this equals `text`.
         val latestMessage = resolveLatestMessage(sbn.notification)
         val cacheKey = listOf(title, latestMessage).filter { it.isNotBlank() }.joinToString(" ")
+        // Content stored on the review row (and shown on the Notifications/Archive tab): the
+        // single newest message, so each row reads as a standalone message rather than the
+        // accumulating MessagingStyle thread. Classification (`text`) and the re-published panel
+        // notification keep the full conversation, so notification-panel chaining is unaffected.
+        // For non-messaging notifications latestMessage == content, so this is a no-op there.
+        val displayContent = latestMessage.ifBlank { content }
         // ──────────────────────────────────────────────────────────────────────
 
         val jobId = UUID.randomUUID().toString().take(8)
@@ -168,7 +174,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (!NativeBridge.isAppManaged(packageName)) {
             log(jobId, packageName, title, content, "MANAGED_FAIL",
                 "App not in managed list — dropped")
-            review(jobId, packageName, title, content, sbn.postTime, "MANAGED_FAIL")
+            review(jobId, packageName, title, displayContent, sbn.postTime, "MANAGED_FAIL")
             return
         }
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
@@ -191,7 +197,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
                 log(jobId, packageName, title, content, "PUBLISHED",
                     "Forwarded to user via locked-screen bypass")
-                review(jobId, packageName, title, content, sbn.postTime, "LOCKED_PASS", messageText = cacheKey)
+                review(jobId, packageName, title, displayContent, sbn.postTime, "LOCKED_PASS", messageText = cacheKey)
             } else {
                 synchronized(deferredKeys) {
                     deferredKeys.add(originalKey)
@@ -214,7 +220,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via contact whitelist")
-            review(jobId, packageName, title, content, sbn.postTime, "CONTACT_PASS", messageText = cacheKey)
+            review(jobId, packageName, title, displayContent, sbn.postTime, "CONTACT_PASS", messageText = cacheKey)
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -225,7 +231,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (NativeBridge.containsBlocklistedKeyword(text)) {
             log(jobId, packageName, title, content, "KEYWORD_BLOCKED",
                 "Body matched a blocked keyword rule — silenced")
-            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_BLOCKED", messageText = cacheKey)
+            review(jobId, packageName, title, displayContent, sbn.postTime, "KEYWORD_BLOCKED", messageText = cacheKey)
             return
         }
         log(jobId, packageName, title, content, "BLOCKLIST_MISS",
@@ -238,7 +244,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via keyword match")
-            review(jobId, packageName, title, content, sbn.postTime, "KEYWORD_PASS", messageText = cacheKey)
+            review(jobId, packageName, title, displayContent, sbn.postTime, "KEYWORD_PASS", messageText = cacheKey)
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -312,12 +318,12 @@ class ZigNotificationListenerService : NotificationListenerService() {
             notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
             log(jobId, packageName, title, content, "PUBLISHED",
                 "Forwarded to user via $decidedBy")
-            review(jobId, packageName, title, content, sbn.postTime, "PUBLISHED",
+            review(jobId, packageName, title, displayContent, sbn.postTime, "PUBLISHED",
                 result.baseConfidence, inferredCategory, cacheKey)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
                 "Blocked by $decidedBy (base score ${result.baseConfidence}) — suppressed")
-            review(jobId, packageName, title, content, sbn.postTime, "MODEL_BLOCKED",
+            review(jobId, packageName, title, displayContent, sbn.postTime, "MODEL_BLOCKED",
                 result.baseConfidence, inferredCategory, cacheKey)
         }
     }
