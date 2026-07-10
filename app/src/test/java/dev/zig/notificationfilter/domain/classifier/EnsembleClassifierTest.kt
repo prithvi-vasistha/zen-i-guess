@@ -78,6 +78,7 @@ class EnsembleClassifierTest {
             state: String,
             status: String,
             cutoff: Long,
+            tappedId: Long,
         ) = Unit
     }
 

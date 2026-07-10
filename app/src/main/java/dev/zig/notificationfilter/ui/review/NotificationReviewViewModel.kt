@@ -306,6 +306,7 @@ class NotificationReviewViewModel @Inject constructor(
                 state = state.name,
                 status = overrideStatus,
                 cutoff = cutoff,
+                tappedId = id,
             )
             // Status written first (by the cascade): rememberOverride reads it back to label
             // the embedding.

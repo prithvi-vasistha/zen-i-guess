@@ -88,8 +88,9 @@ interface NotificationReviewDao {
     // Sorting is applied in Kotlin on the emitted list — see ReviewFilter / SortBy.
     // Phase D: IN clause expanded to include PUBLISHED so the review screen shows
     // both model-blocked and model-allowed notifications with context-aware actions.
-    // v3: CONTACT_PASS / KEYWORD_PASS / KEYWORD_BLOCKED added so deterministic rule matches
-    // surface too — rendered as read-only badges (their verdict is immutable, no override).
+    // v3: the active inbox additionally surfaces deterministic rule matches
+    // (CONTACT_PASS / KEYWORD_PASS / KEYWORD_BLOCKED) as read-only badges, so the last 24h
+    // is a complete picture of everything the managed-apps pipeline did.
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED',
@@ -103,12 +104,14 @@ interface NotificationReviewDao {
     """)
     fun searchActiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
-    // Archive = last 30 days (>= archiveCutoffTimestamp), overlapping with the active inbox.
-    // Today's notifications appear in both tabs.
+    // The "Train" screen (formerly Archive) = last 30 days. AI decisions ONLY
+    // (LLM_BLOCKED / MODEL_BLOCKED / PUBLISHED): these are the rows whose verdict the user can
+    // correct to fine-tune the on-device model. Deterministic rule matches are immutable and so
+    // deliberately excluded here — they live only in the 24h inbox. Overlaps with the inbox, so
+    // today's AI-decided notifications appear in both.
     @Query("""
         SELECT * FROM notification_review
-        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED',
-                                 'CONTACT_PASS', 'KEYWORD_PASS', 'KEYWORD_BLOCKED')
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
         AND timestamp >= :archiveCutoffTimestamp
         AND (packageName LIKE '%' || :query || '%'
           OR title      LIKE '%' || :query || '%'
@@ -118,17 +121,18 @@ interface NotificationReviewDao {
     fun searchArchiveFlow(archiveCutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>>
 
     // ── Cascading state synchronisation (v3) ───────────────────────────────────
-    // Applies one Allow/Block decision to every identical notification (same package,
-    // title, and content) still inside the active review window. Bounding by :cutoff
-    // keeps the cascade to what the inbox actually shows; older duplicates in the archive
-    // keep their prior state. syncStatus is reset so a changed decision is re-exported to
-    // the training dataset (mirrors updateReviewState). The DB Flow re-emits, so all
-    // matching cards update in the UI without a separate in-memory list.
+    // Applies one Allow/Block decision to the tapped row (always, via id = :tappedId, so
+    // corrections work on the 30-day Train screen too) plus every identical notification
+    // (same package, title, and content) still inside the active 24h window. Bounding the
+    // co-update by :cutoff keeps the cascade to recent duplicates; older duplicates keep their
+    // prior state. syncStatus is reset so a changed decision is re-exported to the training
+    // dataset (mirrors updateReviewState). The DB Flow re-emits, so all matching cards update
+    // in the UI without a separate in-memory list.
     @Query("""
         UPDATE notification_review
         SET reviewState = :state, syncStatus = 'UNPROCESSED', userOverrideStatus = :status
         WHERE packageName = :packageName AND title = :title AND content = :content
-        AND timestamp >= :cutoff
+        AND (timestamp >= :cutoff OR id = :tappedId)
     """)
     suspend fun cascadeOverride(
         packageName: String,
@@ -137,6 +141,7 @@ interface NotificationReviewDao {
         state: String,
         status: String,
         cutoff: Long,
+        tappedId: Long,
     )
 
     // Count of reviewable notifications (MODEL_BLOCKED + PUBLISHED) with a timestamp on or

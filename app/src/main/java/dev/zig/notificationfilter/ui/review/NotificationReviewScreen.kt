@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -294,7 +295,7 @@ private fun NotificationReviewScreen(
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        text = if (showArchive) "Archive" else "Notifications",
+                        text = if (showArchive) "Train" else "Notifications",
                         style = MaterialTheme.typography.titleLarge,
                     )
                 },
@@ -310,8 +311,12 @@ private fun NotificationReviewScreen(
                 },
                 actions = {
                     if (!showArchive) {
-                        TextButton(onClick = onToggleArchive) {
-                            Text("Archive")
+                        // Enters the Train screen: correct past AI decisions to fine-tune the model.
+                        IconButton(onClick = onToggleArchive) {
+                            Icon(
+                                imageVector = Icons.Default.Build,
+                                contentDescription = "Train",
+                            )
                         }
                     }
                 },
@@ -425,7 +430,7 @@ private fun NotificationReviewScreen(
                     is ReviewUiState.Loading -> { /* intentionally blank — avoids flicker */ }
                     is ReviewUiState.Empty -> {
                         ZigEmptyState(
-                            title = if (showArchive) "Archive is empty" else "You're all caught up",
+                            title = if (showArchive) "No AI decisions to train on yet" else "You're all caught up",
                             doodle = {
                                 Image(
                                     painter = painterResource(R.drawable.ic_empty_notifications),
