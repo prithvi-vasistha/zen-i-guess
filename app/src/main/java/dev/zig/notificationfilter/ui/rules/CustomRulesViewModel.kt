@@ -7,6 +7,8 @@ import dev.zig.notificationfilter.data.local.NativeBridge
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
 import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
 import dev.zig.notificationfilter.data.local.db.KeywordRuleType
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
+import dev.zig.notificationfilter.ui.tour.ScreenTourState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +19,14 @@ import javax.inject.Inject
 @HiltViewModel
 class CustomRulesViewModel @Inject constructor(
     private val keywordRuleDao: KeywordRuleDao,
+    preferences: ZigUserPreferences,
 ) : ViewModel() {
+
+    // First-visit coach-mark tour. Progress lives here so it survives tab switches.
+    val tour = ScreenTourState(
+        startActive = !preferences.rulesTourSeen,
+        onFinished = { preferences.rulesTourSeen = true },
+    )
 
     val allowRules: StateFlow<List<KeywordRuleEntity>> =
         keywordRuleDao.getByType(KeywordRuleType.ALLOW.name)

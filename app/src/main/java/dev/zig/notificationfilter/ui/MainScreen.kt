@@ -109,12 +109,16 @@ fun MainScreen(
             state = pagerState,
             modifier = Modifier.padding(innerPadding),
         ) { page ->
+            // A tour should only run on the page the user is actually looking at, not on the
+            // pages the pager pre-composes off-screen.
+            val isCurrent = pagerState.currentPage == page
             when (ZigScreen.all[page]) {
                 ZigScreen.Review -> NotificationReviewRoute(
                     onStartDailyReview = { showDailyReview = true },
+                    isCurrentPage = isCurrent,
                 )
                 ZigScreen.Apps -> ManagedAppsScreen()
-                ZigScreen.Rules -> CustomRulesScreen()
+                ZigScreen.Rules -> CustomRulesScreen(isCurrentPage = isCurrent)
                 ZigScreen.Settings -> SettingsScreen()
                 ZigScreen.Logs -> LogsScreen()
             }

@@ -15,7 +15,9 @@ import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.NotificationReviewEntity
 import dev.zig.notificationfilter.data.local.db.ReviewState
+import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
+import dev.zig.notificationfilter.ui.tour.ScreenTourState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -73,8 +75,15 @@ class NotificationReviewViewModel @Inject constructor(
     private val overrideDao: AppCategoryOverrideDao,
     private val managedAppDao: ManagedAppDao,
     private val personalMemory: PersonalMemory,
+    preferences: ZigUserPreferences,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
+
+    // First-visit coach-mark tour. Progress lives here so it survives tab switches.
+    val tour = ScreenTourState(
+        startActive = !preferences.notificationsTourSeen,
+        onFinished = { preferences.notificationsTourSeen = true },
+    )
 
     private companion object {
         private const val TWENTY_FOUR_HOURS_MS = 24L * 60L * 60L * 1_000L

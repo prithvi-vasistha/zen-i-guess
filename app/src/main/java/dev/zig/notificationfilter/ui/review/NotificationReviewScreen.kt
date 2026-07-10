@@ -73,7 +73,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -101,6 +103,11 @@ import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
 import dev.zig.notificationfilter.ui.theme.ZigOnGreen
+import dev.zig.notificationfilter.ui.tour.TourController
+import dev.zig.notificationfilter.ui.tour.TourOverlay
+import dev.zig.notificationfilter.ui.tour.TourStep
+import dev.zig.notificationfilter.ui.tour.rememberTourController
+import dev.zig.notificationfilter.ui.tour.tourTarget
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -127,6 +134,25 @@ private enum class EffectiveCardAction {
         }
     }
 }
+
+// ── First-visit coach-mark tour ────────────────────────────────────────────────
+// Anchors live on the first (demo) app card and the top-bar Train icon. The controller is
+// passed down via a CompositionLocal so deep card composables can register their bounds without
+// threading it through every signature; only the first card registers (isTourAnchor).
+
+private const val NOTIF_ACTIONS_KEY = "notif_actions"
+private const val NOTIF_CATEGORY_KEY = "notif_category"
+private const val NOTIF_APP_CATEGORY_KEY = "notif_app_category"
+private const val NOTIF_TRAIN_KEY = "notif_train"
+
+private val NOTIFICATIONS_TOUR_STEPS = listOf(
+    TourStep(NOTIF_ACTIONS_KEY, "Filtered notifications land here. Tap Allow or Block & Mute to correct ZiG."),
+    TourStep(NOTIF_CATEGORY_KEY, "Set the category for this one notification to make ZiG more accurate."),
+    TourStep(NOTIF_APP_CATEGORY_KEY, "Or set one default category for the whole app."),
+    TourStep(NOTIF_TRAIN_KEY, "Tap Train anytime to fine-tune ZiG from your past decisions."),
+)
+
+private val LocalReviewTourController = staticCompositionLocalOf<TourController?> { null }
 
 // ── Rule-match badge: immutable, deterministic verdicts (contact / keyword) ───
 // These rows were decided by a hardcoded rule, not the classifier, so they carry no
@@ -186,6 +212,7 @@ private fun ChipFilter.displayLabel(): String = when (this) {
 fun NotificationReviewRoute(
     modifier: Modifier = Modifier,
     onStartDailyReview: () -> Unit = {},
+    isCurrentPage: Boolean = true,
 ) {
     val viewModel: NotificationReviewViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
@@ -241,34 +268,55 @@ fun NotificationReviewRoute(
 
     var showArchive by remember { mutableStateOf(false) }
 
-    NotificationReviewScreen(
-        uiState = uiState,
-        archiveUiState = archiveUiState,
-        filter = filter,
-        packageLabels = packageLabels,
-        appIcons = appIcons,
-        categoryOverrides = categoryOverrides,
-        showArchive = showArchive,
-        archiveDateFilter = archiveDateFilter,
-        isRefreshing = isRefreshing,
-        managedAppCount = managedAppCount,
-        todayReviewCount = todayReviewCount,
-        onStartDailyReview = onStartDailyReview,
-        snackbarHostState = snackbarHostState,
-        onToggleArchive = { showArchive = !showArchive },
-        onRefresh = viewModel::refresh,
-        onQueryChange = viewModel::setQuery,
-        onSortFieldChange = viewModel::setSortField,
-        onSortDirectionChange = viewModel::setSortDirection,
-        onChipFilterChange = viewModel::setChipFilter,
-        onArchiveDateFilterChange = viewModel::setArchiveDateFilter,
-        onAllowClicked = onAllow,
-        onBlockAndMuteClicked = onBlockAndMute,
-        onSetCategoryOverride = viewModel::setCategoryOverride,
-        onSetUserCategory = viewModel::setUserAssignedCategory,
-        onDismiss = onDismiss,
-        modifier = modifier,
-    )
+    val tourActive by viewModel.tour.active.collectAsState()
+    val tourStep by viewModel.tour.step.collectAsState()
+    val tourController = rememberTourController()
+
+    Box(modifier = modifier.fillMaxSize()) {
+        CompositionLocalProvider(
+            LocalReviewTourController provides (if (tourActive) tourController else null),
+        ) {
+            NotificationReviewScreen(
+                uiState = uiState,
+                archiveUiState = archiveUiState,
+                filter = filter,
+                packageLabels = packageLabels,
+                appIcons = appIcons,
+                categoryOverrides = categoryOverrides,
+                showArchive = showArchive,
+                archiveDateFilter = archiveDateFilter,
+                isRefreshing = isRefreshing,
+                managedAppCount = managedAppCount,
+                todayReviewCount = todayReviewCount,
+                onStartDailyReview = onStartDailyReview,
+                snackbarHostState = snackbarHostState,
+                onToggleArchive = { showArchive = !showArchive },
+                onRefresh = viewModel::refresh,
+                onQueryChange = viewModel::setQuery,
+                onSortFieldChange = viewModel::setSortField,
+                onSortDirectionChange = viewModel::setSortDirection,
+                onChipFilterChange = viewModel::setChipFilter,
+                onArchiveDateFilterChange = viewModel::setArchiveDateFilter,
+                onAllowClicked = onAllow,
+                onBlockAndMuteClicked = onBlockAndMute,
+                onSetCategoryOverride = viewModel::setCategoryOverride,
+                onSetUserCategory = viewModel::setUserAssignedCategory,
+                onDismiss = onDismiss,
+            )
+        }
+
+        // The tour only shows on the inbox (not the Train sub-screen) and only while this is the
+        // current tab; leaving the tab pauses it and returning resumes at the same step.
+        if (isCurrentPage && tourActive && !showArchive) {
+            TourOverlay(
+                steps = NOTIFICATIONS_TOUR_STEPS,
+                currentStep = tourStep,
+                controller = tourController,
+                onNext = { viewModel.tour.advance(tourStep == NOTIFICATIONS_TOUR_STEPS.lastIndex) },
+                onSkip = { viewModel.tour.finish() },
+            )
+        }
+    }
 }
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -328,7 +376,10 @@ private fun NotificationReviewScreen(
                 actions = {
                     if (!showArchive) {
                         // Enters the Train screen: correct past AI decisions to fine-tune the model.
-                        IconButton(onClick = onToggleArchive) {
+                        IconButton(
+                            onClick = onToggleArchive,
+                            modifier = Modifier.tourTarget(LocalReviewTourController.current, NOTIF_TRAIN_KEY),
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Build,
                                 contentDescription = "Train",
@@ -680,6 +731,8 @@ private fun ReviewListContent(
                     onSetUserCategory = onSetUserCategory,
                     // Inbox rows are swipe-to-dismiss; archive rows pass null (see below).
                     onDismiss = onDismiss,
+                    // The first card carries the coach-mark anchors for the notification tour.
+                    isTourAnchor = groupIndex == 0,
                 )
             }
         }
@@ -884,6 +937,8 @@ private fun AppGroupCard(
     onSetUserCategory: (Long, String?) -> Unit,
     // Non-null on the active inbox (enables swipe-to-dismiss); null on the archive.
     onDismiss: ((Long) -> Unit)? = null,
+    // True for the first inbox card: it hosts the coach-mark anchors for the notification tour.
+    isTourAnchor: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(true) }
 
@@ -907,6 +962,7 @@ private fun AppGroupCard(
                 onSetOverride = onSetCategoryOverride,
                 expanded = expanded,
                 onToggle = { expanded = !expanded },
+                isTourAnchor = isTourAnchor,
             )
             if (expanded) {
                 HorizontalDivider(color = ZigGreen.copy(alpha = 0.18f), thickness = 0.5.dp)
@@ -914,7 +970,7 @@ private fun AppGroupCard(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items.forEach { item ->
+                    items.forEachIndexed { index, item ->
                         // key() so each row keeps its own swipe state positionally and is
                         // discarded cleanly when the row leaves the list after a dismiss.
                         key(item.id) {
@@ -924,6 +980,7 @@ private fun AppGroupCard(
                                     onAllowClicked = onAllowClicked,
                                     onBlockAndMuteClicked = onBlockAndMuteClicked,
                                     onSetUserCategory = onSetUserCategory,
+                                    isTourAnchor = isTourAnchor && index == 0,
                                 )
                             }
                             if (onDismiss != null) {
@@ -950,8 +1007,10 @@ private fun AppGroupHeader(
     expanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    isTourAnchor: Boolean = false,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val tourController = LocalReviewTourController.current
 
     Row(
         modifier = modifier
@@ -997,7 +1056,12 @@ private fun AppGroupHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Box {
+        Box(
+            modifier = Modifier.tourTarget(
+                tourController.takeIf { isTourAnchor },
+                NOTIF_APP_CATEGORY_KEY,
+            ),
+        ) {
             val overrideColors = currentOverride?.let { categoryChipColors(it) }
             SuggestionChip(
                 onClick = { menuExpanded = true },
@@ -1113,7 +1177,9 @@ private fun ReviewItemCard(
     onSetUserCategory: (Long, String?) -> Unit,
     modifier: Modifier = Modifier,
     categoryChipModifier: Modifier = Modifier,
+    isTourAnchor: Boolean = false,
 ) {
+    val tourController = LocalReviewTourController.current
     // A deterministic rule (contact/keyword) decided this row — its verdict is immutable, so it
     // renders a disabled read-only badge instead of Allow/Block. Null for classifier rows.
     val ruleBadge = RuleBadge.from(item.systemDecision)
@@ -1171,28 +1237,37 @@ private fun ReviewItemCard(
             CategoryRow(
                 item = item,
                 onSetUserCategory = onSetUserCategory,
-                chipModifier = categoryChipModifier,
+                chipModifier = categoryChipModifier.tourTarget(
+                    tourController.takeIf { isTourAnchor },
+                    NOTIF_CATEGORY_KEY,
+                ),
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (ruleBadge != null) {
-                ReadOnlyRuleBadge(badge = ruleBadge)
-            } else {
-                AnimatedContent(
-                    targetState = effectiveAction,
-                    transitionSpec = {
-                        fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
-                    },
-                    label = "action_row",
-                ) { action ->
-                    ActionRow(
-                        action = action,
-                        id = item.id,
-                        isPublishedRow = item.systemDecision == "PUBLISHED",
-                        onAllowClicked = onAllowClicked,
-                        onBlockAndMuteClicked = onBlockAndMuteClicked,
-                    )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tourTarget(tourController.takeIf { isTourAnchor }, NOTIF_ACTIONS_KEY),
+            ) {
+                if (ruleBadge != null) {
+                    ReadOnlyRuleBadge(badge = ruleBadge)
+                } else {
+                    AnimatedContent(
+                        targetState = effectiveAction,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(160))
+                        },
+                        label = "action_row",
+                    ) { action ->
+                        ActionRow(
+                            action = action,
+                            id = item.id,
+                            isPublishedRow = item.systemDecision == "PUBLISHED",
+                            onAllowClicked = onAllowClicked,
+                            onBlockAndMuteClicked = onBlockAndMuteClicked,
+                        )
+                    }
                 }
             }
         }

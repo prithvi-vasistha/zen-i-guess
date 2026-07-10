@@ -66,16 +66,39 @@ import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
 import dev.zig.notificationfilter.ui.theme.ZigGreen
+import dev.zig.notificationfilter.ui.tour.TourOverlay
+import dev.zig.notificationfilter.ui.tour.TourStep
+import dev.zig.notificationfilter.ui.tour.rememberTourController
+import dev.zig.notificationfilter.ui.tour.tourTarget
 
 private val ALLOW_SUGGESTIONS = listOf("otp", "verification code", "password", "bank")
 private val BLOCK_SUGGESTIONS = listOf("promo", "discount", "offer", "sale", "crypto")
 
+// ── First-visit coach-mark tour ────────────────────────────────────────────────
+// The two tabs get their own highlights (step 1 + 2) so it's obvious they are two separate
+// lists, not one control.
+private const val RULES_ALLOW_TAB_KEY = "rules_allow_tab"
+private const val RULES_BLOCK_TAB_KEY = "rules_block_tab"
+private const val RULES_INPUT_KEY = "rules_input"
+private val RULES_TOUR_STEPS = listOf(
+    TourStep(RULES_ALLOW_TAB_KEY, "This is your \"Allowed\" list. Notifications with these words always come through."),
+    TourStep(RULES_BLOCK_TAB_KEY, "This is your \"Blocked\" list. Notifications with these words are always hidden."),
+    TourStep(RULES_INPUT_KEY, "Type a word here to add it to the selected list. Your rules always come first."),
+)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun CustomRulesScreen(modifier: Modifier = Modifier) {
+fun CustomRulesScreen(
+    modifier: Modifier = Modifier,
+    isCurrentPage: Boolean = true,
+) {
     val viewModel: CustomRulesViewModel = hiltViewModel()
     val allowRules by viewModel.allowRules.collectAsState()
     val blockRules by viewModel.blockRules.collectAsState()
+
+    val tourActive by viewModel.tour.active.collectAsState()
+    val tourStep by viewModel.tour.step.collectAsState()
+    val tourController = rememberTourController()
 
     var selectedTab by rememberSaveable { mutableStateOf(0) }
     var inputText by rememberSaveable { mutableStateOf("") }
@@ -117,7 +140,8 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = {
                 Column {
@@ -156,6 +180,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                         inputText = ""
                     }
                 },
+                modifier = Modifier.tourTarget(tourController, RULES_ALLOW_TAB_KEY),
                 selectedContentColor = ZigGreen,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
@@ -174,6 +199,7 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                         inputText = ""
                     }
                 },
+                modifier = Modifier.tourTarget(tourController, RULES_BLOCK_TAB_KEY),
                 selectedContentColor = MaterialTheme.colorScheme.error,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
@@ -219,7 +245,8 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                 keyboardActions = KeyboardActions(onDone = { onSaveOrAdd() }),
                 modifier = Modifier
                     .weight(1f)
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester)
+                    .tourTarget(tourController, RULES_INPUT_KEY),
             )
             IconButton(onClick = { onSaveOrAdd() }) {
                 Icon(
@@ -298,6 +325,16 @@ fun CustomRulesScreen(modifier: Modifier = Modifier) {
                     )
                 }
             }
+        }
+    }
+        if (isCurrentPage && tourActive) {
+            TourOverlay(
+                steps = RULES_TOUR_STEPS,
+                currentStep = tourStep,
+                controller = tourController,
+                onNext = { viewModel.tour.advance(tourStep == RULES_TOUR_STEPS.lastIndex) },
+                onSkip = { viewModel.tour.finish() },
+            )
         }
     }
 }

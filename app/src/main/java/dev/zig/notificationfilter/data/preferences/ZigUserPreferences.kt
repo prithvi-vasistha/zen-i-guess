@@ -69,6 +69,16 @@ class ZigUserPreferences @Inject constructor(
         get() = prefs.getBoolean(KEY_CONTACTS_BYPASS_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_CONTACTS_BYPASS_ENABLED, value).apply()
 
+    // One-time coach-mark tours, shown the first time the user visits each screen after
+    // onboarding. Set to true once the user finishes or skips the tour.
+    var notificationsTourSeen: Boolean
+        get() = prefs.getBoolean(KEY_NOTIFICATIONS_TOUR_SEEN, false)
+        set(value) = prefs.edit().putBoolean(KEY_NOTIFICATIONS_TOUR_SEEN, value).apply()
+
+    var rulesTourSeen: Boolean
+        get() = prefs.getBoolean(KEY_RULES_TOUR_SEEN, false)
+        set(value) = prefs.edit().putBoolean(KEY_RULES_TOUR_SEEN, value).apply()
+
     private companion object {
         const val KEY_DAILY_SUMMARY = "daily_summary_enabled"
         const val KEY_DAILY_SUMMARY_HOUR = "daily_summary_hour"
@@ -80,5 +90,7 @@ class ZigUserPreferences @Inject constructor(
         const val KEY_SETUP_BANNER_DISMISSED = "setup_banner_dismissed"
         const val KEY_SENSITIVE_NOTIFICATIONS = "sensitive_notifications_enabled"
         const val KEY_CONTACTS_BYPASS_ENABLED = "contacts_bypass_enabled"
+        const val KEY_NOTIFICATIONS_TOUR_SEEN = "notifications_tour_seen"
+        const val KEY_RULES_TOUR_SEEN = "rules_tour_seen"
     }
 }
