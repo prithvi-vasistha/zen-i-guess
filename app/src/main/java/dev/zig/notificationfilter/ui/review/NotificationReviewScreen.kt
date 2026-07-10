@@ -160,9 +160,9 @@ private fun SortField.displayLabel(): String = when (this) {
 }
 
 private fun SortDirection.displayLabel(sortField: SortField): String = when (sortField) {
-    SortField.TIME     -> if (this == SortDirection.DESC) "Newest first" else "Oldest first"
+    SortField.TIME     -> if (this == SortDirection.DESC) "Newest" else "Oldest"
     SortField.APP_NAME -> if (this == SortDirection.DESC) "Z → A" else "A → Z"
-    SortField.STATUS   -> if (this == SortDirection.DESC) "Blocked first" else "Allowed first"
+    SortField.STATUS   -> if (this == SortDirection.DESC) "Blocked" else "Allowed"
 }
 
 private fun String.toDisplayCategory(): String = removePrefix("CATEGORY_")
@@ -539,6 +539,7 @@ private fun SortFieldMenu(
             value = "Sort: ${current.displayLabel()}",
             onValueChange = {},
             readOnly = true,
+            singleLine = true,
             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
             modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
@@ -581,6 +582,7 @@ private fun SortDirectionMenu(
             value = "Order: ${current.displayLabel(sortField)}",
             onValueChange = {},
             readOnly = true,
+            singleLine = true,
             trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
             modifier = Modifier.fillMaxWidth(),
             textStyle = MaterialTheme.typography.bodySmall,
@@ -659,8 +661,9 @@ private fun ReviewListContent(
 // so an empty-looking feed reads as "nothing to review" rather than "notifications missing".
 @Composable
 private fun FeedFooter(managedAppCount: Int) {
+    if(managedAppCount == 1){
     Text(
-        text = "ZiG is currently monitoring $managedAppCount apps. To see the rest of your " +
+        text = "ZiG is currently monitoring 1 app. To see the rest of your " +
             "notifications, add them to ZiG.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -668,7 +671,19 @@ private fun FeedFooter(managedAppCount: Int) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 32.dp, vertical = 24.dp),
-    )
+    )}
+    else{
+        Text(
+            text = "ZiG is currently monitoring $managedAppCount apps. To see the rest of your " +
+                    "notifications, add them to ZiG.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp, vertical = 24.dp),
+        )
+    }
 }
 
 // ── "New notifications" indicator (inbox + archive) ───────────────────────────
