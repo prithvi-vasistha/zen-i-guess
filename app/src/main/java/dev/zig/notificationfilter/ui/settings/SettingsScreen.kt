@@ -72,6 +72,7 @@ fun SettingsScreen(
     val dailySummaryMinute by viewModel.dailySummaryMinute.collectAsState()
     val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
     val contactsBypassEnabled by viewModel.contactsBypassEnabled.collectAsState()
+    val imageNotificationsEnabled by viewModel.imageNotificationsEnabled.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val showClearMemoryDialog by viewModel.showClearMemoryDialog.collectAsState()
 
@@ -145,7 +146,7 @@ fun SettingsScreen(
                 item {
                     SettingsToggleRow(
                         title = "Sensitive notifications",
-                        subtitle = "Show instantly on lock screen (skip filtering)",
+                        subtitle = "Skip text filtering on lock screen; image setting still applies",
                         checked = sensitiveNotificationsEnabled,
                         onCheckedChange = viewModel::setSensitiveNotificationsEnabled,
                     )
@@ -169,6 +170,14 @@ fun SettingsScreen(
                                 }
                             }
                         },
+                    )
+                }
+                item {
+                    SettingsToggleRow(
+                        title = "Allow image notifications",
+                        subtitle = "When off, block images except from matched contacts",
+                        checked = imageNotificationsEnabled,
+                        onCheckedChange = viewModel::setImageNotificationsEnabled,
                     )
                 }
                 item {

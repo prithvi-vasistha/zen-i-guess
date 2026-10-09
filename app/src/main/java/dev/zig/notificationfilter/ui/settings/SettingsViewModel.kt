@@ -83,6 +83,14 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    private val _imageNotificationsEnabled = MutableStateFlow(preferences.imageNotificationsEnabled)
+    val imageNotificationsEnabled: StateFlow<Boolean> = _imageNotificationsEnabled.asStateFlow()
+
+    fun setImageNotificationsEnabled(enabled: Boolean) {
+        preferences.imageNotificationsEnabled = enabled
+        _imageNotificationsEnabled.value = enabled
+    }
+
     // ── AI Memory reset ───────────────────────────────────────────────────────
 
     private val _showClearMemoryDialog = MutableStateFlow(false)
@@ -147,6 +155,7 @@ class SettingsViewModel @Inject constructor(
                 _dailySummaryHour.value = preferences.dailySummaryHour
                 _dailySummaryMinute.value = preferences.dailySummaryMinute
                 _sensitiveNotificationsEnabled.value = preferences.sensitiveNotificationsEnabled
+                _imageNotificationsEnabled.value = preferences.imageNotificationsEnabled
                 _messages.send(
                     "Restore complete: +${result.managedAppsAdded} apps, " +
                         "+${result.keywordRulesAdded} rules, " +

@@ -90,6 +90,7 @@ class BackupRestoreManager @Inject constructor(
             preferences = BackupPreferences(
                 dailySummaryEnabled = preferences.dailySummaryEnabled,
                 sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
+                imageNotificationsEnabled = preferences.imageNotificationsEnabled,
             ),
             managedApps = managedAppDao.getAllPackageNames(),
             keywordRules = keywordSnapshot.map { it.conditions },
@@ -134,6 +135,7 @@ class BackupRestoreManager @Inject constructor(
         preferences.dailySummaryHour = payload.preferences.dailySummaryHour
         preferences.dailySummaryMinute = payload.preferences.dailySummaryMinute
         preferences.sensitiveNotificationsEnabled = payload.preferences.sensitiveNotificationsEnabled
+        preferences.imageNotificationsEnabled = payload.preferences.imageNotificationsEnabled
         // reschedule() (CANCEL_AND_REENQUEUE) rather than schedule() (KEEP) so the restored
         // time is picked up even if a job was already running at the old time.
         if (payload.preferences.dailySummaryEnabled) dailySummaryScheduler.reschedule()

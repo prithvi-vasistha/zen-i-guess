@@ -89,12 +89,12 @@ interface NotificationReviewDao {
     // Phase D: IN clause expanded to include PUBLISHED so the review screen shows
     // both model-blocked and model-allowed notifications with context-aware actions.
     // v3: the active inbox additionally surfaces deterministic rule matches
-    // (CONTACT_PASS / KEYWORD_PASS / KEYWORD_BLOCKED) as read-only badges, so the last 24h
+    // (CONTACT_PASS / KEYWORD_PASS / KEYWORD_BLOCKED / IMAGE_BLOCKED) as read-only badges, so the last 24h
     // is a complete picture of everything the managed-apps pipeline did.
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED',
-                                 'CONTACT_PASS', 'KEYWORD_PASS', 'KEYWORD_BLOCKED')
+                                 'CONTACT_PASS', 'KEYWORD_PASS', 'KEYWORD_BLOCKED', 'IMAGE_BLOCKED')
         AND reviewState != 'DISMISSED'
         AND timestamp >= :cutoffTimestamp
         AND (packageName LIKE '%' || :query || '%'

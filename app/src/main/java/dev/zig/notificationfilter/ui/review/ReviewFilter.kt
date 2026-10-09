@@ -6,7 +6,7 @@ package dev.zig.notificationfilter.ui.review
 //   AI_DECISIONS  — only rows the on-device classifier decided (MODEL_BLOCKED / PUBLISHED /
 //                   legacy LLM_BLOCKED). These are the actionable Allow/Block rows.
 //   BLOCKED       — anything silenced, whether by the model or a keyword rule
-//                   (MODEL_BLOCKED / LLM_BLOCKED / KEYWORD_BLOCKED).
+//                   (MODEL_BLOCKED / LLM_BLOCKED / KEYWORD_BLOCKED / IMAGE_BLOCKED).
 enum class ChipFilter { ALL, AI_DECISIONS, BLOCKED }
 
 data class ReviewFilter(

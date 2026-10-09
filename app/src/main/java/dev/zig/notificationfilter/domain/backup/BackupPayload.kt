@@ -17,9 +17,9 @@ import kotlinx.serialization.Serializable
  * @property version           schema version. Bumped on a shape change so [BackupRestoreManager]
  *                             can refuse a file it cannot read. v2 added managedApps,
  *                             keywordRules and categoryOverrides; v3 added keywordRulesV2
- *                             carrying the rule type (ALLOW / BLOCK).
+ *                             carrying the rule type (ALLOW / BLOCK); v4 added the image toggle.
  * @property exportDate        Unix epoch seconds the file was written. Informational only.
- * @property preferences       the two genuine user-facing toggles. Internal lifecycle flags
+ * @property preferences       user-facing notification settings. Internal lifecycle flags
  *                             (onboarding, seeding guards, terms) are intentionally excluded —
  *                             restoring them across devices would misfire onboarding/seeding.
  * @property managedApps       package names ZiG is filtering (the managed_app table).
@@ -43,7 +43,7 @@ data class BackupPayload(
 ) {
     companion object {
         /** The schema version this build writes and is able to read. */
-        const val CURRENT_VERSION = 3
+        const val CURRENT_VERSION = 4
     }
 }
 
@@ -67,6 +67,7 @@ data class BackupPreferences(
     @SerialName("daily_summary_hour") val dailySummaryHour: Int = 20,
     @SerialName("daily_summary_minute") val dailySummaryMinute: Int = 0,
     @SerialName("sensitive_notifications_enabled") val sensitiveNotificationsEnabled: Boolean,
+    @SerialName("image_notifications_enabled") val imageNotificationsEnabled: Boolean = true,
 )
 
 /**

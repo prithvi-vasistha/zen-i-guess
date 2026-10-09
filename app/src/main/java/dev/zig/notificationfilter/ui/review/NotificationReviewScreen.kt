@@ -154,20 +154,28 @@ private val NOTIFICATIONS_TOUR_STEPS = listOf(
 
 private val LocalReviewTourController = staticCompositionLocalOf<TourController?> { null }
 
-// ── Rule-match badge: immutable, deterministic verdicts (contact / keyword) ───
-// These rows were decided by a hardcoded rule, not the classifier, so they carry no
+// ── Automatic badge: deterministic verdicts (contact / keyword / image setting) ───
+// These rows were decided by a rule or setting, not the classifier, so they carry no
 // Allow/Block affordance — only a disabled read-only badge stating what the rule did.
 
-private enum class RuleBadge(val label: String) {
+private enum class RuleBadge(
+    val label: String,
+    val explanation: String = "Applied automatically by a rule — not counted as training signal",
+) {
     CONTACT_ALLOWED("✓ Contact Matched — Allowed"),
     KEYWORD_ALLOWED("🛡️ Keyword Matched — Allowed"),
-    KEYWORD_BLOCKED("🛡️ Keyword Matched — Blocked");
+    KEYWORD_BLOCKED("🛡️ Keyword Matched — Blocked"),
+    IMAGE_BLOCKED(
+        "Image blocked by setting",
+        "Applied automatically by a setting — not counted as training signal",
+    );
 
     companion object {
         fun from(systemDecision: String): RuleBadge? = when (systemDecision) {
             "CONTACT_PASS"    -> CONTACT_ALLOWED
             "KEYWORD_PASS"    -> KEYWORD_ALLOWED
             "KEYWORD_BLOCKED" -> KEYWORD_BLOCKED
+            "IMAGE_BLOCKED"   -> IMAGE_BLOCKED
             else              -> null
         }
     }
@@ -1180,7 +1188,7 @@ private fun ReviewItemCard(
     isTourAnchor: Boolean = false,
 ) {
     val tourController = LocalReviewTourController.current
-    // A deterministic rule (contact/keyword) decided this row — its verdict is immutable, so it
+    // A deterministic rule or image setting decided this row — its verdict is immutable, so it
     // renders a disabled read-only badge instead of Allow/Block. Null for classifier rows.
     val ruleBadge = RuleBadge.from(item.systemDecision)
     val effectiveAction = EffectiveCardAction.from(item.systemDecision, item.userOverrideStatus)
@@ -1372,7 +1380,7 @@ private fun ActionRow(
 
 // ── Read-only rule badge ──────────────────────────────────────────────────────
 // A disabled, full-width Button (enabled = false) for rows decided by a deterministic
-// contact/keyword rule. It cannot be pressed or focused and uses M3 disabled color tokens,
+// contact/keyword rule or image setting. It cannot be pressed or focused and uses M3 disabled color tokens,
 // signalling an immutable system action rather than a user-changeable decision.
 
 @Composable
@@ -1388,7 +1396,7 @@ private fun ReadOnlyRuleBadge(
         ) { Text(badge.label) }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Applied automatically by a rule — not counted as training signal",
+            text = badge.explanation,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
         )

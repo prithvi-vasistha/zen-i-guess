@@ -20,6 +20,7 @@ class BackupPayloadTest {
         preferences = BackupPreferences(
             dailySummaryEnabled = true,
             sensitiveNotificationsEnabled = false,
+            imageNotificationsEnabled = false,
         ),
         managedApps = listOf("com.bank.app", "com.chat.app"),
         keywordRules = listOf(listOf("OTP", "verification"), listOf("code")),
@@ -53,6 +54,7 @@ class BackupPayloadTest {
         assertTrue(text.contains("\"export_date\""))
         assertTrue(text.contains("\"daily_summary_enabled\""))
         assertTrue(text.contains("\"sensitive_notifications_enabled\""))
+        assertTrue(text.contains("\"image_notifications_enabled\""))
         assertTrue(text.contains("\"managed_apps\""))
         assertTrue(text.contains("\"keyword_rules\""))
         assertTrue(text.contains("\"category_overrides\""))
@@ -79,6 +81,29 @@ class BackupPayloadTest {
         assertTrue(payload.managedApps.isEmpty())
         assertTrue(payload.keywordRules.isEmpty())
         assertTrue(payload.categoryOverrides.isEmpty())
+        assertTrue(payload.preferences.imageNotificationsEnabled)
+    }
+
+    @Test
+    fun `older backups without the image toggle default to allowing images`() {
+        val old = """
+            {
+              "version": 3,
+              "export_date": 100,
+              "preferences": { "daily_summary_enabled": true, "sensitive_notifications_enabled": true },
+              "rac_memory": []
+            }
+        """.trimIndent()
+        val payload = json.decodeFromString(BackupPayload.serializer(), old)
+        assertTrue(payload.preferences.imageNotificationsEnabled)
+    }
+
+    @Test
+    fun `disabled image preference survives backup serialization`() {
+        val restored = json.decodeFromString(
+            BackupPayload.serializer(), json.encodeToString(BackupPayload.serializer(), sample()),
+        )
+        assertEquals(false, restored.preferences.imageNotificationsEnabled)
     }
 
     @Test

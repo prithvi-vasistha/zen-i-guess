@@ -92,9 +92,9 @@ class NotificationReviewViewModel @Inject constructor(
         private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d")
 
         // Chip-filter membership. AI_DECISIONS = rows the classifier decided (actionable);
-        // BLOCKED = anything silenced, whether by the model or a keyword rule.
+        // BLOCKED = anything silenced by the model, a keyword rule, or the image setting.
         private val AI_DECISION_SET = setOf("MODEL_BLOCKED", "PUBLISHED", "LLM_BLOCKED")
-        private val BLOCKED_SET = setOf("MODEL_BLOCKED", "LLM_BLOCKED", "KEYWORD_BLOCKED")
+        private val BLOCKED_SET = setOf("MODEL_BLOCKED", "LLM_BLOCKED", "KEYWORD_BLOCKED", "IMAGE_BLOCKED")
     }
 
     // ── Filter state ──────────────────────────────────────────────────────────

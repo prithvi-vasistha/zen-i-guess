@@ -55,7 +55,8 @@ class ZigUserPreferences @Inject constructor(
         set(value) = prefs.edit().putBoolean(KEY_SETUP_BANNER_DISMISSED, value).apply()
 
     // When true (default), a notification the sender marked sensitive (VISIBILITY_PRIVATE)
-    // that arrives while the device is locked is shown immediately, bypassing the filter.
+    // that arrives while the device is locked bypasses text filtering. The image setting
+    // still applies: private unmatched senders are deferred when images are disabled.
     // When false, it is not shown while locked — it is deferred and classified on unlock.
     var sensitiveNotificationsEnabled: Boolean
         get() = prefs.getBoolean(KEY_SENSITIVE_NOTIFICATIONS, true)
@@ -68,6 +69,12 @@ class ZigUserPreferences @Inject constructor(
     var contactsBypassEnabled: Boolean
         get() = prefs.getBoolean(KEY_CONTACTS_BYPASS_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_CONTACTS_BYPASS_ENABLED, value).apply()
+
+    // Images are eligible for normal filtering by default. When disabled, the final
+    // delivery gate blocks image notifications unless Smart Contact Bypass matched.
+    var imageNotificationsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_IMAGE_NOTIFICATIONS, true)
+        set(value) = prefs.edit().putBoolean(KEY_IMAGE_NOTIFICATIONS, value).apply()
 
     // One-time coach-mark tours, shown the first time the user visits each screen after
     // onboarding. Set to true once the user finishes or skips the tour.
@@ -90,6 +97,7 @@ class ZigUserPreferences @Inject constructor(
         const val KEY_SETUP_BANNER_DISMISSED = "setup_banner_dismissed"
         const val KEY_SENSITIVE_NOTIFICATIONS = "sensitive_notifications_enabled"
         const val KEY_CONTACTS_BYPASS_ENABLED = "contacts_bypass_enabled"
+        const val KEY_IMAGE_NOTIFICATIONS = "image_notifications_enabled"
         const val KEY_NOTIFICATIONS_TOUR_SEEN = "notifications_tour_seen"
         const val KEY_RULES_TOUR_SEEN = "rules_tour_seen"
     }

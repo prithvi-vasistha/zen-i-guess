@@ -141,10 +141,16 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (notifCategory == Notification.CATEGORY_SERVICE ||
             notifCategory == Notification.CATEGORY_SYSTEM) return
 
-        // 4. Notifications with no visible text are shell/update pings — nothing to show.
+        // 4. Keep image-only notifications so the final image gate can inspect them.
+        // A private notification may be redacted to nothing while locked; when image
+        // filtering is enabled, retain it for re-evaluation after unlock too.
         val title = resolveTitle(sbn)
         val content = resolveContent(sbn.notification)
-        if (title.isBlank() && content.isBlank()) return
+        val hasImage = NotificationImageDetector.hasImage(sbn.notification)
+        val privateWhileLocked = keyguardManager.isKeyguardLocked &&
+            sbn.notification.visibility == Notification.VISIBILITY_PRIVATE
+        if (title.isBlank() && content.isBlank() && !hasImage &&
+            !(privateWhileLocked && !preferences.imageNotificationsEnabled)) return
         // Pre-format the classifier input once here so it is available to every gate,
         // to the review() helper, and to the exact-match cache check in the ensemble.
         val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
@@ -161,6 +167,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // notification keep the full conversation, so notification-panel chaining is unaffected.
         // For non-messaging notifications latestMessage == content, so this is a no-op there.
         val displayContent = latestMessage.ifBlank { content }
+            .ifBlank { if (hasImage) "Image attachment" else "" }
         // ──────────────────────────────────────────────────────────────────────
 
         val jobId = UUID.randomUUID().toString().take(8)
@@ -179,48 +186,87 @@ class ZigNotificationListenerService : NotificationListenerService() {
         }
         log(jobId, packageName, title, content, "MANAGED_PASS", "App is managed")
 
+        // Honour the preference explicitly as well as the Rust set: a contact sync already
+        // in flight when the user disables bypass must not create an image exemption.
+        val contactMatched = preferences.contactsBypassEnabled &&
+            NativeBridge.isContactWhitelisted(title.trim().lowercase())
+
+        // Every allow path uses this final gate, including the locked-screen shortcut.
+        // Contact matches remain exempt; keyword/model/cache allows cannot override the toggle.
+        suspend fun publishAllowed(
+            systemDecision: String,
+            reason: String,
+            modelConfidence: Float = 0f,
+            inferredCategory: String = "UNKNOWN",
+        ) {
+            when (NotificationDeliveryPolicy.decide(
+                hasImage = hasImage,
+                imagesEnabled = preferences.imageNotificationsEnabled,
+                contactBypass = contactMatched,
+                privateWhileLocked = privateWhileLocked,
+                sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
+            )) {
+                NotificationDeliveryDecision.DEFER_UNTIL_UNLOCK -> {
+                    synchronized(deferredKeys) {
+                        deferredKeys.add(originalKey)
+                        if (deferredKeys.size > maxDeferred) {
+                            deferredKeys.remove(deferredKeys.first())
+                        }
+                    }
+                    log(jobId, packageName, title, content, "LOCKED_DEFERRED",
+                        "Private notification deferred until unlock to check content and image settings")
+                }
+                NotificationDeliveryDecision.BLOCK_IMAGE -> {
+                    log(jobId, packageName, title, content, "IMAGE_BLOCKED",
+                        "Image notifications disabled and no contact bypass matched — suppressed")
+                    review(jobId, packageName, title, displayContent, sbn.postTime,
+                        "IMAGE_BLOCKED", messageText = cacheKey)
+                }
+                NotificationDeliveryDecision.FORWARD -> {
+                    notificationPublisher.publish(
+                        packageName, title,
+                        content.ifBlank { if (hasImage) "Image attachment" else "" },
+                        contentIntent, originalKey, sbn.id, sbn.notification.category,
+                    )
+                    log(jobId, packageName, title, content, "PUBLISHED", reason)
+                    review(jobId, packageName, title, displayContent, sbn.postTime,
+                        systemDecision, modelConfidence, inferredCategory, cacheKey)
+                }
+            }
+        }
+
         // Locked screen + sender-marked-sensitive (VISIBILITY_PRIVATE). Behaviour is governed
         // by the user's "Sensitive notifications" setting:
         //
-        //  • ON (default) — VIP hall-pass: show it immediately without filtering. (Some users
-        //    prefer never to miss a sensitive alert on the lock screen.)
+        //  • ON (default) — bypass text filtering, subject to the final image setting.
+        //    If images are disabled and the sender isn't a matched contact, defer too:
+        //    redacted metadata cannot prove that a private notification has no image.
         //
         //  • OFF — defer: Android delivers redacted text ("sensitive content" placeholder) to
         //    listeners while locked, so classifying now is meaningless. Record the key, publish
         //    nothing (no disturbance), and re-fetch the full content to classify on unlock
         //    (see processDeferredOnUnlock).
-        if (keyguardManager.isKeyguardLocked &&
-            sbn.notification?.visibility == Notification.VISIBILITY_PRIVATE) {
-            if (preferences.sensitiveNotificationsEnabled) {
-                log(jobId, packageName, title, content, "LOCKED_PASS",
-                    "Device locked + VISIBILITY_PRIVATE — sensitive notifications enabled, bypassing filter")
-                notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
-                log(jobId, packageName, title, content, "PUBLISHED",
-                    "Forwarded to user via locked-screen bypass")
-                review(jobId, packageName, title, displayContent, sbn.postTime, "LOCKED_PASS", messageText = cacheKey)
+        if (privateWhileLocked) {
+            if (preferences.sensitiveNotificationsEnabled && contactMatched) {
+                log(jobId, packageName, title, content, "CONTACT_PASS",
+                    "Title \"$title\" matched contact whitelist")
+                publishAllowed("CONTACT_PASS", "Forwarded to user via contact whitelist")
             } else {
-                synchronized(deferredKeys) {
-                    deferredKeys.add(originalKey)
-                    // Bound the backlog: drop the oldest once we exceed the cap.
-                    if (deferredKeys.size > maxDeferred) {
-                        deferredKeys.remove(deferredKeys.first())
-                    }
+                if (preferences.sensitiveNotificationsEnabled && preferences.imageNotificationsEnabled) {
+                    log(jobId, packageName, title, content, "LOCKED_PASS",
+                        "Device locked + VISIBILITY_PRIVATE — sensitive notifications enabled, bypassing text filter")
                 }
-                log(jobId, packageName, title, content, "LOCKED_DEFERRED",
-                    "Device locked + VISIBILITY_PRIVATE — deferred until unlock for classification")
+                publishAllowed("LOCKED_PASS", "Forwarded to user via locked-screen bypass")
             }
             return
         }
 
         // Gate 2: contact whitelist (Tier 1 — highest priority, bypasses classifier)
         // Lookup is lowercased to match the normalised names stored by ContactsSyncManager.
-        if (NativeBridge.isContactWhitelisted(title.trim().lowercase())) {
+        if (contactMatched) {
             log(jobId, packageName, title, content, "CONTACT_PASS",
                 "Title \"$title\" matched contact whitelist")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
-            log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via contact whitelist")
-            review(jobId, packageName, title, displayContent, sbn.postTime, "CONTACT_PASS", messageText = cacheKey)
+            publishAllowed("CONTACT_PASS", "Forwarded to user via contact whitelist")
             return
         }
         log(jobId, packageName, title, content, "CONTACT_MISS",
@@ -241,10 +287,7 @@ class ZigNotificationListenerService : NotificationListenerService() {
         if (NativeBridge.containsWhitelistedKeyword(text)) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
                 "Body matched an allowed keyword rule")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
-            log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via keyword match")
-            review(jobId, packageName, title, displayContent, sbn.postTime, "KEYWORD_PASS", messageText = cacheKey)
+            publishAllowed("KEYWORD_PASS", "Forwarded to user via keyword match")
             return
         }
         log(jobId, packageName, title, content, "KEYWORD_MISS",
@@ -314,12 +357,9 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         if (result.allowed) {
             log(jobId, packageName, title, content, "MODEL_ALLOWED",
-                "Allowed by $decidedBy (base score ${result.baseConfidence}) — forwarding")
-            notificationPublisher.publish(packageName, title, content, contentIntent, originalKey, sbn.id, sbn.notification?.category)
-            log(jobId, packageName, title, content, "PUBLISHED",
-                "Forwarded to user via $decidedBy")
-            review(jobId, packageName, title, displayContent, sbn.postTime, "PUBLISHED",
-                result.baseConfidence, inferredCategory, cacheKey)
+                "Allowed by $decidedBy (base score ${result.baseConfidence}) — checking final delivery settings")
+            publishAllowed("PUBLISHED", "Forwarded to user via $decidedBy",
+                result.baseConfidence, inferredCategory)
         } else {
             log(jobId, packageName, title, content, "MODEL_BLOCKED",
                 "Blocked by $decidedBy (base score ${result.baseConfidence}) — suppressed")
