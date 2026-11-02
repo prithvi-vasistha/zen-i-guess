@@ -9,13 +9,13 @@ plugins {
 
 android {
     namespace = "dev.zig.notificationfilter"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "dev.zig.notificationfilter"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 4
         versionName = "1.0.0"
 

@@ -183,10 +183,10 @@ native/rust_filter/              # Rust JNI library (cdylib)
 | Native filter engine | Rust (JNI via `cargo-ndk`) | 2021 edition |
 | Base classifier | Custom TFLite via Google LiteRT | 1.0.1 |
 | Text embeddings | MediaPipe Text Embedder (Universal Sentence Encoder) | 0.10.35 |
-| Build system | Gradle Kotlin DSL + AGP | 8.5.2 |
+| Build system | Gradle Kotlin DSL + AGP | 8.10.1 |
 | NDK | NDK | 27.0.12077973 |
 | Min SDK | Android 8.0 Oreo | API 26 |
-| Target SDK | Android 15 | API 35 |
+| Target SDK | Android 16 | API 36 |
 
 ---
 
@@ -194,7 +194,8 @@ native/rust_filter/              # Rust JNI library (cdylib)
 
 ### Prerequisites
 
-- **Android Studio** Ladybug (2024.2) or newer
+- **Android Studio** Meerkat Feature Drop (2024.3.2) or newer
+- **Android SDK Platform** Android 16 (API 36)
 - **Android NDK** `27.0.12077973` — install via *SDK Manager → SDK Tools → NDK (Side by side)*
 - **Rust + Cargo** — install from [rustup.rs](https://rustup.rs)
 - **cargo-ndk** — the Gradle build installs this automatically on first run if it is absent
