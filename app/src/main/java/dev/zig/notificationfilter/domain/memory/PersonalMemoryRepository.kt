@@ -43,14 +43,28 @@ class PersonalMemoryRepository @Inject constructor(
         val row = dao.getById(id) ?: return
         // Demo rows must never enter the corpus — they are illustrative, not the user's data.
         if (row.jobId.startsWith(DemoDataSeeder.DEMO_JOB_PREFIX)) return
-        val embedding = embedder.embed(embeddingText(row)) ?: return
-        dao.updateEmbedding(id, embedding)
+        val text = embeddingText(row)
+        if (row.messageText.isBlank() && text.isNotBlank()) dao.updateMessageText(id, text)
+        // The verdict may have changed even when embedding is unavailable. Do not keep
+        // serving a cached vector labelled with the previous block/allow decision.
         invalidate()
+        val embedding = embedder.embed(text) ?: return
+        mutex.withLock {
+            // Undo or Clear Memory may have run while the model was embedding. Do not
+            // resurrect a vector after that decision was removed.
+            val status = dao.getById(id)?.userOverrideStatus
+            if (status == "MANUALLY_ALLOWED" || status == "MANUALLY_BLOCKED") {
+                dao.updateEmbedding(id, embedding)
+            }
+            cache = null
+        }
     }
 
     override suspend fun forgetOverride(id: Long) {
-        dao.updateEmbedding(id, null)
-        invalidate()
+        mutex.withLock {
+            dao.updateEmbedding(id, null)
+            cache = null
+        }
     }
 
     override suspend fun reload() {
@@ -64,8 +78,8 @@ class PersonalMemoryRepository @Inject constructor(
         }
     }
 
-    private fun invalidate() {
-        cache = null
+    private suspend fun invalidate() {
+        mutex.withLock { cache = null }
     }
 
     private companion object {
@@ -73,6 +87,8 @@ class PersonalMemoryRepository @Inject constructor(
         // title and content joined by a space, blanks dropped. Keeping this identical ensures a
         // stored override embeds to the same space a live notification is searched against.
         fun embeddingText(row: NotificationReviewEntity): String =
-            listOf(row.title, row.content).filter { it.isNotBlank() }.joinToString(" ")
+            row.messageText.ifBlank {
+                listOf(row.title, row.content).filter { it.isNotBlank() }.joinToString(" ")
+            }
     }
 }

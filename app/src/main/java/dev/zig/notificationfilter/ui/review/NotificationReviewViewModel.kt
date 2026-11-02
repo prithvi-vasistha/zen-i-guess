@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.ui.review
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
@@ -19,6 +20,8 @@ import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
 import dev.zig.notificationfilter.ui.tour.ScreenTourState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,8 +36,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.recoverErrors
+import dev.zig.notificationfilter.core.errors.launchSafely
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
@@ -42,6 +47,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 data class NotificationReviewUiItem(
     val id: Long,
@@ -55,6 +61,8 @@ data class NotificationReviewUiItem(
     val inferredCategory: String,
     val userAssignedCategory: String?,
     val userOverrideStatus: String,
+    val deliveryStatus: String = "LEGACY",
+    val deliveryDetail: String = "",
 )
 
 sealed interface ReviewUiState {
@@ -78,6 +86,8 @@ class NotificationReviewViewModel @Inject constructor(
     preferences: ZigUserPreferences,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    private val _messages = Channel<String>(Channel.UNLIMITED)
+    val messages = _messages.receiveAsFlow()
 
     // First-visit coach-mark tour. Progress lives here so it survives tab switches.
     val tour = ScreenTourState(
@@ -139,7 +149,7 @@ class NotificationReviewViewModel @Inject constructor(
     val refreshCompleted: SharedFlow<Unit> = _refreshCompleted.asSharedFlow()
 
     fun refresh() {
-        viewModelScope.launch {
+        viewModelScope.launchSafely("Refreshing notifications") {
             _isRefreshing.value = true
             _refreshSignal.tryEmit(Unit)
             delay(700)
@@ -186,6 +196,7 @@ class NotificationReviewViewModel @Inject constructor(
             }
     }
         .flowOn(Dispatchers.Default)
+        .recoverErrors("Loading notifications")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -208,6 +219,7 @@ class NotificationReviewViewModel @Inject constructor(
             }
     }
         .flowOn(Dispatchers.Default)
+        .recoverErrors("Loading notification history")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -230,6 +242,7 @@ class NotificationReviewViewModel @Inject constructor(
 
     val categoryOverrides: StateFlow<Map<String, String>> = overrideDao.getAllFlow()
         .map { list -> list.associate { it.packageName to it.defaultCategory } }
+        .recoverErrors("Loading app categories")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -242,6 +255,7 @@ class NotificationReviewViewModel @Inject constructor(
 
     val managedAppCount: StateFlow<Int> = managedAppDao.getAll()
         .map { it.size }
+        .recoverErrors("Loading managed app count")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -255,6 +269,7 @@ class NotificationReviewViewModel @Inject constructor(
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val todayReviewCount: StateFlow<Int> = todayStartFlow
         .flatMapLatest { startOfDay -> dao.countTodayAiUndecidedFlow(startOfDay) }
+        .recoverErrors("Loading daily review count")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -264,7 +279,7 @@ class NotificationReviewViewModel @Inject constructor(
     // ── Init: resolve labels for any packages that appear in either list ──────
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launchSafely("Loading notification app details") {
             merge(uiState, archiveUiState).collect { state ->
                 when (state) {
                     is ReviewUiState.Content -> resolveLabelsIfNeeded(state.groups.keys)
@@ -289,7 +304,10 @@ class NotificationReviewViewModel @Inject constructor(
                 } else try {
                     val info = context.packageManager.getApplicationInfo(pkg, 0)
                     context.packageManager.getApplicationLabel(info).toString()
-                } catch (_: Exception) {
+                } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                    pkg.substringAfterLast('.')
+                } catch (failure: Throwable) {
+                    AppErrors.report("Loading notification app name", failure, 60_000L)
                     pkg.substringAfterLast('.')
                 }
                 labelCache[pkg] = label
@@ -314,7 +332,10 @@ class NotificationReviewViewModel @Inject constructor(
         drawable.setBounds(0, 0, 48, 48)
         drawable.draw(canvas)
         bitmap.asImageBitmap()
-    } catch (_: Exception) {
+    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+        null
+    } catch (failure: Throwable) {
+        AppErrors.report("Loading notification app icon", failure, 60_000L)
         null
     }
 
@@ -330,26 +351,37 @@ class NotificationReviewViewModel @Inject constructor(
     // in-memory list to keep in sync. Only the tapped row is embedded into Personal Memory so
     // the KNN corpus doesn't accumulate duplicate vectors for the same text.
     private fun cascadeDecision(id: Long, state: ReviewState, overrideStatus: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val row = dao.getById(id) ?: return@launch
-            val cutoff = System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS
-            dao.cascadeOverride(
-                packageName = row.packageName,
-                title = row.title,
-                content = row.content,
-                state = state.name,
-                status = overrideStatus,
-                cutoff = cutoff,
-                tappedId = id,
-            )
-            // Status written first (by the cascade): rememberOverride reads it back to label
-            // the embedding.
-            personalMemory.rememberOverride(id)
+        viewModelScope.launchSafely("Saving review decision", Dispatchers.IO) {
+            var saved = false
+            try {
+                val row = dao.getById(id) ?: return@launchSafely
+                val cutoff = System.currentTimeMillis() - TWENTY_FOUR_HOURS_MS
+                dao.cascadeOverride(
+                    packageName = row.packageName,
+                    title = row.title,
+                    content = row.content,
+                    state = state.name,
+                    status = overrideStatus,
+                    cutoff = cutoff,
+                    tappedId = id,
+                )
+                saved = true
+                // Status written first: rememberOverride reads it back to label the embedding.
+                personalMemory.rememberOverride(id)
+                _messages.send("ZiG has recorded your preference.")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                AppErrors.report("Saving review decision", e)
+                Log.e("NotificationReview", "Could not record review decision", e)
+                _messages.send(if (saved) "Decision saved. Learning couldn't finish; please try again later."
+                    else "Couldn't save your decision. Please try again.")
+            }
         }
     }
 
     fun onUndoClicked(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Undoing review decision", Dispatchers.IO) {
             dao.updateReviewState(id, ReviewState.PENDING.name)
             dao.updateOverrideStatus(id, "NONE")
             // Row no longer represents a user decision — drop it from Personal Memory.
@@ -364,7 +396,7 @@ class NotificationReviewViewModel @Inject constructor(
     // Swipe-to-dismiss (inbox only): hide the row from the active inbox without touching the
     // override/sync state, so it still lives in the archive and creates no training signal.
     fun onDismiss(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Dismissing notification", Dispatchers.IO) {
             val prior = dao.getById(id)?.reviewState ?: ReviewState.PENDING
             dismissedPriorState[id] = prior
             dao.setReviewStateOnly(id, ReviewState.DISMISSED.name)
@@ -372,7 +404,7 @@ class NotificationReviewViewModel @Inject constructor(
     }
 
     fun onRestoreDismissed(id: Long) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Restoring dismissed notification", Dispatchers.IO) {
             val prior = dismissedPriorState.remove(id) ?: ReviewState.PENDING
             dao.setReviewStateOnly(id, prior.name)
         }
@@ -380,7 +412,7 @@ class NotificationReviewViewModel @Inject constructor(
 
     // Null category clears the app-level override; non-null upserts it.
     fun setCategoryOverride(packageName: String, category: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Saving app category", Dispatchers.IO) {
             if (category == null) {
                 overrideDao.delete(packageName)
             } else {
@@ -391,7 +423,7 @@ class NotificationReviewViewModel @Inject constructor(
 
     // Null category resets the per-notification user assignment back to the inferred value.
     fun setUserAssignedCategory(id: Long, category: String?) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Saving notification category", Dispatchers.IO) {
             dao.updateUserAssignedCategory(id, category)
         }
     }
@@ -434,6 +466,8 @@ class NotificationReviewViewModel @Inject constructor(
         content = content,
         timestamp = timestamp,
         systemDecision = systemDecision,
+        deliveryStatus = deliveryStatus,
+        deliveryDetail = deliveryDetail,
         reviewState = reviewState,
         modelConfidence = modelConfidence,
         inferredCategory = inferredCategory,

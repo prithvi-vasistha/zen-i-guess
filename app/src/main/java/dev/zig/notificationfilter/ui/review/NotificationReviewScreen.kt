@@ -72,9 +72,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import dev.zig.notificationfilter.ui.common.themedDoodlePainter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -94,15 +95,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
 import kotlinx.coroutines.withTimeoutOrNull
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
-import androidx.compose.ui.res.painterResource
 import dev.zig.notificationfilter.R
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
-import dev.zig.notificationfilter.ui.theme.ZigGreen
-import dev.zig.notificationfilter.ui.theme.ZigOnGreen
 import dev.zig.notificationfilter.ui.tour.TourController
 import dev.zig.notificationfilter.ui.tour.TourOverlay
 import dev.zig.notificationfilter.ui.tour.TourStep
@@ -168,14 +166,23 @@ private enum class RuleBadge(
     IMAGE_BLOCKED(
         "Image blocked by setting",
         "Applied automatically by a setting — not counted as training signal",
-    );
+    ),
+    LOCKED_ALLOWED("Allowed by lock-screen setting"),
+    DEFERRED("Waiting for unlock", "Content will be checked after unlock — not counted as training signal"),
+    WAIT_ENDED("Pending check ended", "See delivery details — not counted as training signal"),
+    HIDDEN("Content hidden by Android", "Open the original app to read it — not counted as training signal"),
+    ERROR("Processing interrupted", "Delivery failed before a filtering decision — not counted as training signal");
 
     companion object {
-        fun from(systemDecision: String): RuleBadge? = when (systemDecision) {
+        fun from(systemDecision: String, deliveryStatus: String): RuleBadge? = when (systemDecision) {
             "CONTACT_PASS"    -> CONTACT_ALLOWED
             "KEYWORD_PASS"    -> KEYWORD_ALLOWED
             "KEYWORD_BLOCKED" -> KEYWORD_BLOCKED
             "IMAGE_BLOCKED"   -> IMAGE_BLOCKED
+            "LOCKED_PASS" -> LOCKED_ALLOWED
+            "LOCKED_DEFERRED" -> if (deliveryStatus == "WAITING_FOR_UNLOCK") DEFERRED else WAIT_ENDED
+            "CONTENT_HIDDEN" -> HIDDEN
+            "PIPELINE_ERROR" -> ERROR
             else              -> null
         }
     }
@@ -221,8 +228,8 @@ fun NotificationReviewRoute(
     modifier: Modifier = Modifier,
     onStartDailyReview: () -> Unit = {},
     isCurrentPage: Boolean = true,
+    viewModel: NotificationReviewViewModel = hiltViewModel(),
 ) {
-    val viewModel: NotificationReviewViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
     val archiveUiState by viewModel.archiveUiState.collectAsState()
     val filter by viewModel.filter.collectAsState()
@@ -237,18 +244,13 @@ fun NotificationReviewRoute(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Allow/Block confirm the recorded decision with a one-shot snackbar. The VM cascades the
-    // decision to every identical notification; this only surfaces feedback to the user.
-    val onAllow: (Long) -> Unit = { id ->
-        viewModel.onAllowClicked(id)
-        scope.launch { snackbarHostState.showSnackbar("ZiG has recorded your preference.") }
-    }
-    val onBlockAndMute: (Long) -> Unit = { id ->
-        viewModel.onBlockAndMuteClicked(id)
-        scope.launch { snackbarHostState.showSnackbar("ZiG has recorded your preference.") }
+    val onAllow: (Long) -> Unit = viewModel::onAllowClicked
+    val onBlockAndMute: (Long) -> Unit = viewModel::onBlockAndMuteClicked
+    SafeLaunchedEffect(viewModel) {
+        viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    LaunchedEffect(Unit) {
+    SafeLaunchedEffect(Unit) {
         viewModel.refreshCompleted.collect {
             snackbarHostState.showSnackbar("Up to date")
         }
@@ -260,7 +262,7 @@ fun NotificationReviewRoute(
     // showSnackbar on timeout, which removes the snackbar; an Undo tap within the window restores.
     val onDismiss: (Long) -> Unit = { id ->
         viewModel.onDismiss(id)
-        scope.launch {
+        scope.launchSafely("Updating screen") {
             val result = withTimeoutOrNull(UNDO_SNACKBAR_TIMEOUT_MS) {
                 snackbarHostState.showSnackbar(
                     message = "Notification dismissed",
@@ -404,7 +406,7 @@ private fun NotificationReviewScreen(
         val archiveListState = rememberLazyListState()
         val activeListState = if (showArchive) archiveListState else inboxListState
 
-        LaunchedEffect(filter.sortField, filter.sortDirection) {
+        SafeLaunchedEffect(filter.sortField, filter.sortDirection) {
             activeListState.scrollToItem(0)
         }
 
@@ -419,7 +421,7 @@ private fun NotificationReviewScreen(
                 PullToRefreshDefaults.Indicator(
                     state = pullToRefreshState,
                     isRefreshing = isRefreshing,
-                    color = ZigGreen,
+                    color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.align(Alignment.TopCenter),
                 )
             },
@@ -519,7 +521,7 @@ private fun NotificationReviewScreen(
                             title = if (showArchive) "No AI decisions to train on yet" else "You're all caught up",
                             doodle = {
                                 Image(
-                                    painter = painterResource(R.drawable.ic_empty_notifications),
+                                    painter = themedDoodlePainter(R.drawable.ic_empty_notifications),
                                     contentDescription = null,
                                 )
                             },
@@ -551,7 +553,7 @@ private fun NotificationReviewScreen(
                                 title = "No notifications for this date",
                                 doodle = {
                                     Image(
-                                        painter = painterResource(R.drawable.ic_empty_notifications),
+                                        painter = themedDoodlePainter(R.drawable.ic_empty_notifications),
                                         contentDescription = null,
                                     )
                                 },
@@ -765,8 +767,8 @@ private fun DailyReviewCta(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            color = ZigGreen,
-            contentColor = ZigOnGreen,
+            color = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             shadowElevation = 2.dp,
         ) {
             Row(
@@ -859,12 +861,12 @@ private fun NewNotificationsIndicator(
     }
     val newCount = if (seenNewestTs < 0L) 0 else itemTimestamps.count { it > seenNewestTs }
 
-    LaunchedEffect(newestTs, isAtTop) {
+    SafeLaunchedEffect(newestTs, isAtTop) {
         // Never seed or acknowledge against an empty list. The first composition frame is Loading
         // (itemTimestamps empty, newestTs 0); anchoring the baseline there would make every real
         // notification count as "new" once data arrives, and would fire a spurious reveal-scroll
         // on the empty→real transition. Waiting for the first non-empty list fixes both.
-        if (itemTimestamps.isEmpty()) return@LaunchedEffect
+        if (itemTimestamps.isEmpty()) return@SafeLaunchedEffect
         when {
             seenNewestTs < 0L -> seenNewestTs = newestTs        // first real list: acknowledge existing
             isAtTop -> {
@@ -888,7 +890,7 @@ private fun NewNotificationsIndicator(
         NewNotificationsPill(
             count = newCount,
             onClick = {
-                scope.launch {
+                scope.launchSafely("Updating screen") {
                     listState.animateScrollToItem(0)
                     seenNewestTs = newestTs
                 }
@@ -907,8 +909,8 @@ private fun NewNotificationsPill(
         onClick = onClick,
         modifier = modifier,
         shape = RoundedCornerShape(50),
-        color = ZigGreen,
-        contentColor = ZigOnGreen,
+        color = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary,
         shadowElevation = 4.dp,
     ) {
         Row(
@@ -958,7 +960,7 @@ private fun AppGroupCard(
             containerColor = if (currentOverride != null)
                 categoryChipColors(currentOverride).container
             else
-                ZigGreen.copy(alpha = 0.10f),
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
         ),
         shape = MaterialTheme.shapes.large,
     ) {
@@ -973,7 +975,7 @@ private fun AppGroupCard(
                 isTourAnchor = isTourAnchor,
             )
             if (expanded) {
-                HorizontalDivider(color = ZigGreen.copy(alpha = 0.18f), thickness = 0.5.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), thickness = 0.5.dp)
                 Column(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1044,14 +1046,14 @@ private fun AppGroupHeader(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(ZigGreen.copy(alpha = 0.15f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = appLabel.take(1).uppercase(),
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
-                    color = ZigGreen,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         }
@@ -1059,7 +1061,7 @@ private fun AppGroupHeader(
             text = appLabel,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
-            color = ZigGreen,
+            color = MaterialTheme.colorScheme.primary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -1190,13 +1192,13 @@ private fun ReviewItemCard(
     val tourController = LocalReviewTourController.current
     // A deterministic rule or image setting decided this row — its verdict is immutable, so it
     // renders a disabled read-only badge instead of Allow/Block. Null for classifier rows.
-    val ruleBadge = RuleBadge.from(item.systemDecision)
+    val ruleBadge = RuleBadge.from(item.systemDecision, item.deliveryStatus)
     val effectiveAction = EffectiveCardAction.from(item.systemDecision, item.userOverrideStatus)
 
     val containerColor by animateColorAsState(
         targetValue = when {
             ruleBadge != null                                      -> MaterialTheme.colorScheme.surface
-            effectiveAction == EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> ZigGreen.copy(alpha = 0.15f)
+            effectiveAction == EffectiveCardAction.BLOCK_AND_MUTE_WITH_UNDO -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
             effectiveAction == EffectiveCardAction.ALLOW_WITH_UNDO -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.22f)
             else                                                   -> MaterialTheme.colorScheme.surface
         },
@@ -1250,6 +1252,20 @@ private fun ReviewItemCard(
                     NOTIF_CATEGORY_KEY,
                 ),
             )
+
+            val delivery = dev.zig.notificationfilter.domain.NotificationDeliveryStatus.entries
+                .firstOrNull { it.name == item.deliveryStatus }
+            if (delivery != null && (delivery != dev.zig.notificationfilter.domain.NotificationDeliveryStatus.LEGACY ||
+                    item.systemDecision in setOf("PUBLISHED", "KEYWORD_PASS", "CONTACT_PASS", "LOCKED_PASS"))) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(delivery.label, style = MaterialTheme.typography.labelSmall,
+                    color = if (item.deliveryStatus.startsWith("NOT_POSTED_") && item.deliveryStatus != "NOT_POSTED_FILTERED")
+                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (item.deliveryDetail.isNotBlank()) {
+                    Text(item.deliveryDetail, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

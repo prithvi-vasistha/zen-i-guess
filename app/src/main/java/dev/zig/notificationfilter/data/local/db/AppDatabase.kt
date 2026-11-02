@@ -13,8 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ManagedAppEntity::class,
         NotificationReviewEntity::class,
         AppCategoryOverrideEntity::class,
+        NotificationProcessingEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 @TypeConverters(StringListConverter::class, ReviewEnumConverters::class, FloatArrayConverter::class)
@@ -25,8 +26,26 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun managedAppDao(): ManagedAppDao
     abstract fun notificationReviewDao(): NotificationReviewDao
     abstract fun appCategoryOverrideDao(): AppCategoryOverrideDao
+    abstract fun notificationProcessingDao(): NotificationProcessingDao
 
     companion object {
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `notification_review` ADD COLUMN `deliveryStatus` TEXT NOT NULL DEFAULT 'LEGACY'")
+                db.execSQL("ALTER TABLE `notification_review` ADD COLUMN `deliveryDetail` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `notification_processing` (
+                        `sourceKey` TEXT NOT NULL, `fingerprint` TEXT NOT NULL,
+                        `postTime` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL,
+                        `jobId` TEXT NOT NULL, `state` TEXT NOT NULL,
+                        PRIMARY KEY(`sourceKey`)
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notification_processing_updatedAt` ON `notification_processing` (`updatedAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_notification_processing_state` ON `notification_processing` (`state`)")
+            }
+        }
+
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

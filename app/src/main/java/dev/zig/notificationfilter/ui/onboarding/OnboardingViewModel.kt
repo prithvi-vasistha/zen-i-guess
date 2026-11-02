@@ -8,10 +8,12 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
-import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.FilterState
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppEntity
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
+import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
+import dev.zig.notificationfilter.domain.NotificationHealth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,9 +22,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 data class OnboardingAppInfo(val packageName: String, val label: String)
 
@@ -35,13 +38,19 @@ data class StepUiState(
 class OnboardingViewModel @Inject constructor(
     private val contactsSyncManager: ContactsSyncManager,
     private val managedAppDao: ManagedAppDao,
+    private val filterState: FilterState,
     private val preferences: ZigUserPreferences,
+    private val summaryScheduler: DailySummaryScheduler,
+    private val notificationHealth: NotificationHealth,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
     private val _steps = MutableStateFlow(
         listOf(
             StepUiState(unlocked = true, completed = false),
+            StepUiState(unlocked = false, completed = false),
+            StepUiState(unlocked = false, completed = false),
+            StepUiState(unlocked = false, completed = false),
             StepUiState(unlocked = false, completed = false),
             StepUiState(unlocked = false, completed = false),
             StepUiState(unlocked = false, completed = false),
@@ -61,7 +70,7 @@ class OnboardingViewModel @Inject constructor(
     val selectedAppPackage: StateFlow<String?> = _selectedAppPackage.asStateFlow()
 
     init {
-        viewModelScope.launch(Dispatchers.IO) { loadInstalledApps() }
+        viewModelScope.launchSafely("Loading setup apps", Dispatchers.IO) { loadInstalledApps() }
     }
 
     // Called from the screen's ON_RESUME lifecycle observer when both POST_NOTIFICATIONS
@@ -74,21 +83,23 @@ class OnboardingViewModel @Inject constructor(
     // Rust contact set is a valid, stable state — it simply means no contacts are
     // whitelisted, which is correct for a user who declined.
     fun onContactsBypassResolved(contactsGranted: Boolean) {
-        preferences.contactsBypassEnabled = contactsGranted
-        if (contactsGranted) {
-            contactsSyncManager.register()
-            contactsSyncManager.requestSyncIfNeeded()
+        AppErrors.run("Saving contact bypass setup") {
+            preferences.contactsBypassEnabled = contactsGranted
+            if (contactsGranted) {
+                contactsSyncManager.register()
+                contactsSyncManager.requestSyncIfNeeded()
+            }
+            completeStep(1)
         }
-        completeStep(1)
     }
 
     // Called when the user selects an app from the bottom sheet.
     // Writes to Room and mirrors into the Rust managed-app set so filtering is
     // active for the selected app immediately after onboarding completes.
     fun onAppSelected(packageName: String) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Saving setup app", Dispatchers.IO) {
             managedAppDao.insert(ManagedAppEntity(packageName = packageName))
-            NativeBridge.addAppToManaged(packageName)
+            filterState.refresh()
             withContext(Dispatchers.Main) {
                 _selectedAppPackage.value = packageName
                 completeStep(2)
@@ -99,6 +110,40 @@ class OnboardingViewModel @Inject constructor(
     // Called on ON_RESUME after the user has returned from the app's notification settings
     // (triggered by the silenceStepTapped flag in OnboardingScreen).
     fun onSilenceStepReturned() = completeStep(3)
+    val summaryNeedsTimingAccess: Boolean get() = AppErrors.run("Checking reminder access") { !summaryScheduler.canSchedulePrecisely() } ?: true
+
+    fun requestSummaryAccess(): Intent? {
+        return AppErrors.run("Requesting daily summary access") {
+            val intent = summaryScheduler.requestEnable()
+            if (intent == null) completeStep(4)
+            intent
+        }
+    }
+
+    fun onSummaryPermissionReturned() {
+        AppErrors.run("Completing daily summary setup") {
+            summaryScheduler.resolvePermissionRequest()
+            completeStep(4)
+        }
+    }
+
+    fun onSummarySkipped() {
+        AppErrors.run("Skipping daily summary setup") {
+            summaryScheduler.cancel()
+            completeStep(4)
+        }
+    }
+
+    fun openAlertDisplaySettings() = notificationHealth.openAlertChannel()
+    fun openPhoneSettings() = notificationHealth.openPhoneSettings()
+    fun onNotificationDisplayReviewed() = completeStep(5)
+
+    fun onHiddenContentAlertsResolved(enabled: Boolean) {
+        AppErrors.run("Saving hidden content alert setup") {
+            preferences.hiddenContentAlertsEnabled = enabled
+            completeStep(6)
+        }
+    }
 
     // Marks step[index] complete and unlocks step[index + 1].
     // Idempotent: a double-call (e.g. from a rapid lifecycle resume) is a no-op.

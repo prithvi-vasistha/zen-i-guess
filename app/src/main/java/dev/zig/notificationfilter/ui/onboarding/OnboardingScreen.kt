@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.ui.onboarding
 
+import dev.zig.notificationfilter.core.errors.AppErrors
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +14,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +64,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -80,8 +84,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.zig.notificationfilter.ui.theme.ZigGreen
-import dev.zig.notificationfilter.ui.theme.ZigOnGreen
+import dev.zig.notificationfilter.ui.settings.DailySummaryPermissionDialog
+import dev.zig.notificationfilter.ui.settings.NotificationDisplayDialog
 
 // ── Step metadata ─────────────────────────────────────────────────────────────
 
@@ -112,6 +116,21 @@ private val STEP_DEFINITIONS = listOf(
         subtitle = "Set the selected app to silent to avoid duplicate alert sounds",
         icon = Icons.Default.Settings,
     ),
+    StepDefinition(
+        title = "Daily Summary",
+        subtitle = "Optional recap at your chosen time",
+        icon = Icons.Default.Notifications,
+    ),
+    StepDefinition(
+        title = "Pop-ups & lock screen",
+        subtitle = "Optional: choose how ZiG alerts appear",
+        icon = Icons.Default.Notifications,
+    ),
+    StepDefinition(
+        title = "Hidden message alerts",
+        subtitle = "Get an alert even when Android hides the message",
+        icon = Icons.Default.Notifications,
+    ),
 )
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -133,6 +152,16 @@ fun OnboardingScreen(
     var showCoreRationaleDialog by remember { mutableStateOf(false) }
     var showContactsDialog by remember { mutableStateOf(false) }
     var showAppSheet by remember { mutableStateOf(false) }
+    var showSummaryDialog by rememberSaveable { mutableStateOf(false) }
+    var showNotificationDisplay by rememberSaveable { mutableStateOf(false) }
+    var showHiddenContentAlerts by rememberSaveable { mutableStateOf(false) }
+    var summaryPermissionRequested by rememberSaveable { mutableStateOf(false) }
+    val summaryPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (summaryPermissionRequested) {
+            summaryPermissionRequested = false
+            viewModel.onSummaryPermissionReturned()
+        }
+    }
 
     // Tracks whether the user has tapped Step 4 and gone to system settings.
     // On the next ON_RESUME, the step is marked complete.
@@ -143,22 +172,26 @@ fun OnboardingScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
-            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            AppErrors.run("Opening notification access settings") {
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
         }
     }
 
     val onStep1Tap: () -> Unit = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val alreadyGranted = ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (alreadyGranted) {
-                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        AppErrors.run("Requesting notification access") {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val alreadyGranted = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+                if (alreadyGranted) {
+                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                } else {
+                    postNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
             } else {
-                postNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
-        } else {
-            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
     }
 
@@ -167,22 +200,28 @@ fun OnboardingScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // Step 1
-                val nlsGranted = Settings.Secure.getString(
-                    context.contentResolver, "enabled_notification_listeners",
-                )?.contains(context.packageName) == true
+                AppErrors.run("Checking setup permissions") {
+                    // Step 1
+                    val nlsGranted = Settings.Secure.getString(
+                        context.contentResolver, "enabled_notification_listeners",
+                    )?.contains(context.packageName) == true
 
-                val postGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                    ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.POST_NOTIFICATIONS,
-                    ) == PackageManager.PERMISSION_GRANTED
+                    val postGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                        ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.POST_NOTIFICATIONS,
+                        ) == PackageManager.PERMISSION_GRANTED
 
-                if (nlsGranted && postGranted) viewModel.onCoreAccessGranted()
+                    if (nlsGranted && postGranted) viewModel.onCoreAccessGranted()
 
-                // Step 4 — only complete if the user actually tapped the card and went to settings
-                if (silenceStepTapped) {
-                    viewModel.onSilenceStepReturned()
-                    silenceStepTapped = false
+                    // Step 4 — only complete if the user actually tapped the card and went to settings
+                    if (silenceStepTapped) {
+                        viewModel.onSilenceStepReturned()
+                        silenceStepTapped = false
+                    }
+                    if (summaryPermissionRequested) {
+                        summaryPermissionRequested = false
+                        viewModel.onSummaryPermissionReturned()
+                    }
                 }
             }
         }
@@ -201,11 +240,13 @@ fun OnboardingScreen(
     val onStep4Tap: () -> Unit = {
         val pkg = selectedAppPackage
         if (pkg != null) {
-            silenceStepTapped = true
-            context.startActivity(
-                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                    .putExtra(Settings.EXTRA_APP_PACKAGE, pkg),
-            )
+            AppErrors.run("Opening app notification settings") {
+                context.startActivity(
+                    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, pkg),
+                )
+                silenceStepTapped = true
+            }
         }
     }
 
@@ -215,6 +256,9 @@ fun OnboardingScreen(
         { showContactsDialog = true },
         { showAppSheet = true },
         onStep4Tap,
+        { showSummaryDialog = true },
+        { showNotificationDisplay = true },
+        { showHiddenContentAlerts = true },
     )
 
     // ── Root UI ────────────────────────────────────────────────────────────────
@@ -222,7 +266,8 @@ fun OnboardingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.systemBars),
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .verticalScroll(rememberScrollState()),
         ) {
             // Header
             Column(
@@ -244,7 +289,7 @@ fun OnboardingScreen(
                     Icon(
                         imageVector = Icons.Default.Notifications,
                         contentDescription = null,
-                        tint = ZigGreen,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp),
                     )
                 }
@@ -256,7 +301,7 @@ fun OnboardingScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Setup takes less than 30 seconds.",
+                    text = "Choose how ZiG works for you.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -279,9 +324,9 @@ fun OnboardingScreen(
                 }
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(24.dp))
 
-            // "Enter ZiG" button — slides in once all four steps are complete.
+            // Optional choices also complete their step when skipped.
             AnimatedVisibility(
                 visible = allComplete,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
@@ -294,8 +339,8 @@ fun OnboardingScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 24.dp, vertical = 16.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = ZigGreen,
-                            contentColor = ZigOnGreen,
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     ) {
                         Text("Enter ZiG", style = MaterialTheme.typography.labelLarge)
@@ -306,6 +351,48 @@ fun OnboardingScreen(
     }
 
     // ── Overlay dialogs / sheets ───────────────────────────────────────────────
+    if (showHiddenContentAlerts) {
+        HiddenContentAlertsDialog(
+            onEnable = {
+                showHiddenContentAlerts = false
+                viewModel.onHiddenContentAlertsResolved(true)
+            },
+            onSkip = {
+                showHiddenContentAlerts = false
+                viewModel.onHiddenContentAlertsResolved(false)
+            },
+        )
+    }
+    if (showNotificationDisplay) {
+        NotificationDisplayDialog(
+            onOpenAlerts = { viewModel.openAlertDisplaySettings() },
+            onOpenPhoneSettings = { viewModel.openPhoneSettings() },
+            onDismiss = {
+                showNotificationDisplay = false
+                viewModel.onNotificationDisplayReviewed()
+            },
+            doneLabel = "Continue",
+        )
+    }
+
+    if (showSummaryDialog) {
+        DailySummaryPermissionDialog(
+            needsTimingAccess = viewModel.summaryNeedsTimingAccess,
+            onAllow = {
+                showSummaryDialog = false
+                viewModel.requestSummaryAccess()?.let { intent ->
+                    summaryPermissionRequested = true
+                    try { summaryPermissionLauncher.launch(intent) }
+                    catch (failure: RuntimeException) {
+                        AppErrors.report("Opening permission settings", failure)
+                        summaryPermissionRequested = false
+                        viewModel.onSummarySkipped()
+                    }
+                }
+            },
+            onSkip = { showSummaryDialog = false; viewModel.onSummarySkipped() },
+        )
+    }
     if (showCoreRationaleDialog) {
         CoreAccessRationaleDialog(
             onConfirm = {
@@ -320,7 +407,7 @@ fun OnboardingScreen(
         ContactsBypassDialog(
             onConfirm = {
                 showContactsDialog = false
-                contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+                AppErrors.run("Requesting contact access") { contactsLauncher.launch(Manifest.permission.READ_CONTACTS) }
             },
             onSkip = {
                 showContactsDialog = false
@@ -342,6 +429,17 @@ fun OnboardingScreen(
 }
 
 // ── Step card ─────────────────────────────────────────────────────────────────
+
+@Composable
+internal fun HiddenContentAlertsDialog(onEnable: () -> Unit, onSkip: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onSkip,
+        title = { Text("Alert for hidden content?") },
+        text = { Text("Android can hide OTPs and other sensitive messages from ZiG, even after you unlock. ZiG can still send a generic alert so you know to open the original app. This also works with images off. No additional permission is needed; ZiG cannot read or copy the hidden code. You can change this in Settings → Notifications.") },
+        confirmButton = { TextButton(onClick = onEnable) { Text("Enable alerts") } },
+        dismissButton = { TextButton(onClick = onSkip) { Text("Keep off") } },
+    )
+}
 
 @Composable
 private fun OnboardingStepCard(
@@ -403,7 +501,7 @@ private fun StepBadge(stepNumber: Int, completed: Boolean) {
         modifier = Modifier
             .size(36.dp)
             .background(
-                color = if (completed) ZigGreen else MaterialTheme.colorScheme.surfaceVariant,
+                color = if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 shape = CircleShape,
             ),
     ) {
@@ -411,7 +509,7 @@ private fun StepBadge(stepNumber: Int, completed: Boolean) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = "Completed",
-                tint = ZigOnGreen,
+                tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(18.dp),
             )
         } else {
@@ -438,7 +536,7 @@ private fun CoreAccessRationaleDialog(
             Icon(
                 imageVector = Icons.Default.Notifications,
                 contentDescription = null,
-                tint = ZigGreen,
+                tint = MaterialTheme.colorScheme.primary,
             )
         },
         title = { Text("How ZiG uses notification access") },
@@ -476,7 +574,7 @@ private fun CoreAccessRationaleDialog(
                     text = "All evaluation runs entirely on your device. No notification content is ever transmitted off it.",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = ZigGreen,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         },
@@ -502,7 +600,7 @@ private fun ContactsBypassDialog(
             Icon(
                 imageVector = Icons.Default.Person,
                 contentDescription = null,
-                tint = ZigGreen,
+                tint = MaterialTheme.colorScheme.primary,
             )
         },
         title = { Text("Smart Contact Bypass") },
@@ -521,7 +619,7 @@ private fun ContactsBypassDialog(
                     text = "You can disable this at any time from Settings.",
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = ZigGreen,
+                    color = MaterialTheme.colorScheme.primary,
                 )
             }
         },
@@ -547,7 +645,10 @@ private fun rememberAppIconPainter(packageName: String): BitmapPainter? {
             try {
                 val drawable = context.packageManager.getApplicationIcon(packageName)
                 BitmapPainter(drawable.toBitmap().asImageBitmap())
-            } catch (_: Exception) {
+            } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                null
+            } catch (failure: Throwable) {
+                AppErrors.report("Loading setup app icon", failure, 60_000L)
                 null
             }
         }

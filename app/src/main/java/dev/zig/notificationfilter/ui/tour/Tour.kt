@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.ui.tour
 
+import dev.zig.notificationfilter.core.errors.AppErrors
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -32,7 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,7 +98,7 @@ class ScreenTourState(
     fun finish() {
         if (_active.value) {
             _active.value = false
-            onFinished()
+            AppErrors.run("Saving tour progress") { onFinished() }
         }
     }
 }
@@ -154,7 +155,7 @@ fun TourOverlay(
 
     // Fade the whole overlay in so it never appears as an abrupt black flash.
     val appear = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { appear.animateTo(1f, tween(durationMillis = 220)) }
+    SafeLaunchedEffect(Unit) { appear.animateTo(1f, tween(durationMillis = 220)) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -172,8 +173,8 @@ fun TourOverlay(
         // animate. Held in an Animatable so a one-frame null can never collapse the hole.
         val spotlight = remember { Animatable(Rect.Zero, Rect.VectorConverter) }
         var initialised by remember { mutableStateOf(false) }
-        LaunchedEffect(rawTarget) {
-            val tgt = rawTarget ?: return@LaunchedEffect
+        SafeLaunchedEffect(rawTarget) {
+            val tgt = rawTarget ?: return@SafeLaunchedEffect
             if (!initialised) {
                 spotlight.snapTo(tgt)
                 initialised = true

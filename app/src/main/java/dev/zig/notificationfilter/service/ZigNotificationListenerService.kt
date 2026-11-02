@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Bundle
+import android.util.Log
 // import android.content.pm.PackageManager  // Phase 1: unused — restored if needed in future lanes
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -14,6 +15,11 @@ import androidx.core.content.ContextCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.FilterState
+import dev.zig.notificationfilter.data.local.db.NotificationProcessingDao
+import dev.zig.notificationfilter.data.local.db.NotificationProcessingEntity
+import dev.zig.notificationfilter.domain.NotificationHealth
+import dev.zig.notificationfilter.domain.NotificationDeliveryStatus
 import dev.zig.notificationfilter.data.local.db.NotificationLogDao
 import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
 import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
@@ -25,7 +31,13 @@ import dev.zig.notificationfilter.domain.classifier.EnsembleClassifier
 import dev.zig.notificationfilter.domain.classifier.EnsembleResult
 import dev.zig.notificationfilter.domain.classifier.NotificationCategory
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.security.MessageDigest
+import dev.zig.notificationfilter.core.errors.launchSafely
+import dev.zig.notificationfilter.core.errors.AppErrors
 import java.util.UUID
 import javax.inject.Inject
 
@@ -36,6 +48,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
         // Nullable reference used by NotificationActionReceiver to call cancelNotification().
         // Volatile because the receiver reads it from a different thread.
         @Volatile var instance: ZigNotificationListenerService? = null
+        private val processingMutex = Mutex()
+        private var lastCleanupAt = 0L
     }
 
     // Initialized lazily so getSystemService() is called after onCreate().
@@ -50,20 +64,23 @@ class ZigNotificationListenerService : NotificationListenerService() {
     @Inject lateinit var notificationPublisher: NotificationPublisher
     @Inject lateinit var preferences: ZigUserPreferences
 
-    // Keys of notifications marked sensitive (VISIBILITY_PRIVATE) that arrived while the device
-    // was locked. Android delivers redacted text to listeners on the lock screen, so we cannot
-    // classify them then; we record their keys and re-fetch the full content once the user
-    // unlocks (see [unlockReceiver] / [processDeferredOnUnlock]). Guarded by synchronized(this).
-    private val deferredKeys = LinkedHashSet<String>()
+    @Inject lateinit var processingDao: NotificationProcessingDao
+    @Inject lateinit var filterState: FilterState
+    @Inject lateinit var health: NotificationHealth
+    private var receiverRegistered = false
 
-    // Cap so a device left locked for a long time can't accumulate an unbounded backlog.
-    private val maxDeferred = 100
-
-    // Fires on device unlock (ACTION_USER_PRESENT); triggers re-classification of deferred keys.
     private val unlockReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_USER_PRESENT) {
-                processDeferredOnUnlock()
+                appScope.launchSafely("Recovering notifications after unlock") {
+                    repeat(20) {
+                        if (!keyguardManager.isKeyguardLocked) {
+                            reconcileActiveNotifications()
+                            return@launchSafely
+                        }
+                        delay(250L)
+                    }
+                }
             }
         }
     }
@@ -71,64 +88,185 @@ class ZigNotificationListenerService : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         instance = this
-        // ACTION_USER_PRESENT is a protected system broadcast and cannot be received via the
-        // manifest on API 26+, so it is registered at runtime for the listener's lifetime.
-        ContextCompat.registerReceiver(
-            this,
-            unlockReceiver,
-            IntentFilter(Intent.ACTION_USER_PRESENT),
-            ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
+        health.listenerConnected(true)
+        if (!receiverRegistered) {
+            // USER_PRESENT is a protected system action. System UI may send it
+            // from its own UID; NOT_EXPORTED would reject that legitimate unlock.
+            AppErrors.run("Listening for phone unlock") {
+                ContextCompat.registerReceiver(this, unlockReceiver,
+                    IntentFilter(Intent.ACTION_USER_PRESENT), ContextCompat.RECEIVER_EXPORTED)
+                receiverRegistered = true
+            }
+        }
+        reconcileActiveNotifications()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
-        instance = null
-        try {
-            unregisterReceiver(unlockReceiver)
-        } catch (_: IllegalArgumentException) {
-            // Receiver was never registered (connect failed) — nothing to unregister.
+        if (instance === this) instance = null
+        if (instance == null) health.listenerConnected(false)
+        unregisterUnlockReceiver()
+    }
+
+    override fun onDestroy() {
+        if (instance === this) {
+            instance = null
+            health.listenerConnected(false)
+        }
+        health.ensureListenerConnected()
+        unregisterUnlockReceiver()
+        super.onDestroy()
+    }
+
+    private fun unregisterUnlockReceiver() {
+        if (receiverRegistered) {
+            AppErrors.run("Stopping phone unlock observation") {
+                try { unregisterReceiver(unlockReceiver) } catch (_: IllegalArgumentException) { }
+            }
+            receiverRegistered = false
         }
     }
 
+    private fun trackable(sbn: StatusBarNotification): Boolean =
+        sbn.packageName != packageName && !sbn.isOngoing &&
+            sbn.notification.category != Notification.CATEGORY_SERVICE &&
+            sbn.notification.category != Notification.CATEGORY_SYSTEM
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        // Launch on appScope (Dispatchers.IO + SupervisorJob) so the entire pipeline
-        // including all dao.insert() calls runs off the main thread. A crash in one
-        // notification's coroutine does not affect others.
-        appScope.launch { evaluateNotification(sbn) }
+        if (AppErrors.run("Reading incoming notification") { trackable(sbn) } != true) return
+        health.notificationReceived()
+        appScope.launchSafely("Processing notification") { processNotification(sbn, recovering = false) }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // TODO: Forward to removal pipeline
-    }
-
-    // Re-classifies notifications that were deferred while the device was locked. Invoked on
-    // unlock via [unlockReceiver]. Drains the recorded keys, re-fetches their current (now
-    // un-redacted) content via getActiveNotifications, and runs each back through the pipeline;
-    // since the device is unlocked, the deferral branch is skipped and they flow through
-    // contacts → keywords → the model, which publishes the genuine ones and suppresses spam.
-    private fun processDeferredOnUnlock() {
-        val keys = synchronized(deferredKeys) {
-            if (deferredKeys.isEmpty()) return
-            deferredKeys.toTypedArray().also { deferredKeys.clear() }
-        }
-        appScope.launch {
-            val active = try {
-                getActiveNotifications(keys)
-            } catch (_: Exception) {
-                // Listener not connected or a transient failure — nothing to process.
-                null
-            } ?: return@launch
-            active.forEach { evaluateNotification(it) }
+        if (sbn == null || AppErrors.run("Reading removed notification") { trackable(sbn) } != true) return
+        appScope.launchSafely("Recording notification removal") {
+            processingMutex.withLock {
+                try {
+                    val record = processingDao.get(sbn.key) ?: return@withLock
+                    if (record.state != "COMPLETE") finishUnavailable(record,
+                        "The source app removed this notification before pending work could finish.")
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    AppErrors.report("Recording notification removal", e)
+                }
+            }
         }
     }
 
-    private suspend fun evaluateNotification(sbn: StatusBarNotification) {
+    private fun fingerprint(sbn: StatusBarNotification): String {
+        val latestMessage = resolveLatestMessage(sbn.notification)
+        val codeText = NotificationCodeText.latest(sbn.notification)
+        val parts = listOf(sbn.key, sbn.postTime.toString(), resolveTitle(sbn),
+            resolveContent(sbn.notification), latestMessage,
+            sbn.notification.visibility.toString(), NotificationImageDetector.hasImage(sbn.notification).toString()) +
+            // Preserve existing fingerprints for ordinary messages. Include independent
+            // copy text when big text changes or a newest empty entry replaces a code.
+            if (codeText != latestMessage) listOf("copy-text", codeText) else emptyList()
+        val bytes = parts.joinToString("\u0000").toByteArray(Charsets.UTF_8)
+        return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    }
+
+    private suspend fun processNotification(sbn: StatusBarNotification, recovering: Boolean) =
+        processingMutex.withLock {
+            var jobId = UUID.randomUUID().toString()
+            try {
+                val now = System.currentTimeMillis()
+                if (now - lastCleanupAt >= 60L * 60L * 1_000L) {
+                    processingDao.deleteOlderThan(now - NotificationRecoveryPolicy.RETENTION_MS)
+                    lastCleanupAt = now
+                }
+                val previous = processingDao.get(sbn.key)
+                val signature = fingerprint(sbn)
+                if (!NotificationRecoveryPolicy.shouldProcess(previous?.fingerprint, previous?.state,
+                        signature, previous?.postTime, sbn.postTime, now, recovering)) return@withLock
+                if (previous?.fingerprint == signature) jobId = previous.jobId
+                if (previous != null && previous.fingerprint != signature && previous.state != "COMPLETE") {
+                    reviewDao.updateDelivery(previous.jobId, NotificationDeliveryStatus.SUPERSEDED.name,
+                        "A newer notification from this source replaced the pending check.")
+                }
+                // A crash between the Android post and the DB acknowledgement is ambiguous.
+                // Confirm an existing alert when possible; never repeat an uncertain attempt.
+                if (previous?.fingerprint == signature && previous.state == "POSTING") {
+                    val status = if (notificationPublisher.hasPosted(sbn.key, signature))
+                        NotificationDeliveryStatus.POSTED else NotificationDeliveryStatus.DELIVERY_UNCONFIRMED
+                    reviewDao.updateDelivery(jobId, status.name, status.label)
+                    processingDao.setState(sbn.key, "COMPLETE", now)
+                    return@withLock
+                }
+                processingDao.save(NotificationProcessingEntity(sbn.key, signature, sbn.postTime,
+                    now, jobId, "PROCESSING"))
+                filterState.awaitReady()
+                evaluateNotification(sbn, jobId, signature)
+                val state = processingDao.get(sbn.key)?.state
+                if (state == "PROCESSING" || state == "POSTING") {
+                    processingDao.setState(sbn.key, "COMPLETE", System.currentTimeMillis())
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                AppErrors.report("Processing notification", e)
+                Log.e("ZiG", "Notification processing failed", e)
+                try {
+                    processingDao.setState(sbn.key, "ERROR", System.currentTimeMillis())
+                    log(jobId, sbn.packageName, resolveTitle(sbn), "", "PIPELINE_ERROR",
+                        "Processing interrupted; retry is possible while the original remains available")
+                    review(jobId, sbn.packageName, resolveTitle(sbn), "", sbn.postTime, "PIPELINE_ERROR",
+                        deliveryStatus = NotificationDeliveryStatus.NOT_POSTED_ERROR.name,
+                        deliveryDetail = "Processing was interrupted before delivery.")
+                } catch (failure: Exception) {
+                    if (failure is CancellationException) throw failure
+                    AppErrors.report("Saving notification failure details", failure)
+                }
+            }
+        }
+
+    private suspend fun finishUnavailable(record: NotificationProcessingEntity, detail: String,
+        expired: Boolean = false) {
+        val status = if (expired) NotificationDeliveryStatus.RECOVERY_EXPIRED
+            else if (record.state == "POSTING") NotificationDeliveryStatus.DELIVERY_UNCONFIRMED
+            else NotificationDeliveryStatus.SOURCE_UNAVAILABLE
+        reviewDao.updateDelivery(record.jobId, status.name, detail)
+        processingDao.setState(record.sourceKey, "COMPLETE", System.currentTimeMillis())
+    }
+
+    /** Replay only current, recent work; completed fingerprints are persisted across restarts. */
+    internal fun reconcileActiveNotifications() {
+        appScope.launchSafely("Recovering active notifications") {
+            try {
+                if (instance !== this@ZigNotificationListenerService) return@launchSafely
+                val active = getActiveNotifications() ?: return@launchSafely
+                val keys = active.map { it.key }.toSet()
+                processingMutex.withLock {
+                    val now = System.currentTimeMillis()
+                    processingDao.pending().forEach { record ->
+                        val maxAge = if (record.state == "DEFERRED") NotificationRecoveryPolicy.RETENTION_MS
+                            else NotificationRecoveryPolicy.RECENT_WINDOW_MS
+                        if (now - record.postTime > maxAge) {
+                            finishUnavailable(record, "The recovery window expired; old alerts are not replayed.", expired = true)
+                        } else if (record.sourceKey !in keys) {
+                            finishUnavailable(record, "Pending content is no longer available for recovery.")
+                        }
+                    }
+                    processingDao.deleteOlderThan(now - NotificationRecoveryPolicy.RETENTION_MS)
+                }
+                active.filter(::trackable).sortedBy { it.postTime }.forEach {
+                    processNotification(it, recovering = true)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppErrors.report("Recovering active notifications", e)
+            }
+        }
+    }
+
+    private suspend fun evaluateNotification(sbn: StatusBarNotification, jobId: String, signature: String) {
         val packageName = sbn.packageName
 
         // ── Pre-flight structural filters ──────────────────────────────────────
-        // These drop noise before entering the tracked pipeline — no log row,
-        // no UUID, no DB write. Order matters: cheapest checks first.
+        // Recheck structural eligibility before writing review or log rows.
+        // The processing journal already tracks this source for recovery.
 
         // 1. ZiG's own notifications must not re-enter the pipeline.
         if (packageName == this.packageName) return
@@ -149,8 +287,13 @@ class ZigNotificationListenerService : NotificationListenerService() {
         val hasImage = NotificationImageDetector.hasImage(sbn.notification)
         val privateWhileLocked = keyguardManager.isKeyguardLocked &&
             sbn.notification.visibility == Notification.VISIBILITY_PRIVATE
+        val hiddenContent = NotificationRedactionDetector.isRedacted(this, sbn.notification)
         if (title.isBlank() && content.isBlank() && !hasImage &&
-            !(privateWhileLocked && !preferences.imageNotificationsEnabled)) return
+            !hiddenContent && !(privateWhileLocked && !preferences.imageNotificationsEnabled)) {
+            reviewDao.updateDelivery(jobId, NotificationDeliveryStatus.SOURCE_UNAVAILABLE.name,
+                "No readable content or image metadata was available when checking again.")
+            return
+        }
         // Pre-format the classifier input once here so it is available to every gate,
         // to the review() helper, and to the exact-match cache check in the ensemble.
         val text = listOf(title, content).filter { it.isNotBlank() }.joinToString(" ")
@@ -170,7 +313,6 @@ class ZigNotificationListenerService : NotificationListenerService() {
             .ifBlank { if (hasImage) "Image attachment" else "" }
         // ──────────────────────────────────────────────────────────────────────
 
-        val jobId = UUID.randomUUID().toString().take(8)
         val contentIntent = sbn.notification?.contentIntent
         val originalKey = sbn.key
 
@@ -207,32 +349,68 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
             )) {
                 NotificationDeliveryDecision.DEFER_UNTIL_UNLOCK -> {
-                    synchronized(deferredKeys) {
-                        deferredKeys.add(originalKey)
-                        if (deferredKeys.size > maxDeferred) {
-                            deferredKeys.remove(deferredKeys.first())
-                        }
-                    }
+                    processingDao.setState(originalKey, "DEFERRED", System.currentTimeMillis())
                     log(jobId, packageName, title, content, "LOCKED_DEFERRED",
                         "Private notification deferred until unlock to check content and image settings")
+                    review(jobId, packageName, title, displayContent, sbn.postTime, "LOCKED_DEFERRED",
+                        messageText = cacheKey, deliveryStatus = NotificationDeliveryStatus.WAITING_FOR_UNLOCK.name,
+                        deliveryDetail = "Waiting to check content and image settings after unlock.")
                 }
                 NotificationDeliveryDecision.BLOCK_IMAGE -> {
                     log(jobId, packageName, title, content, "IMAGE_BLOCKED",
                         "Image notifications disabled and no contact bypass matched — suppressed")
                     review(jobId, packageName, title, displayContent, sbn.postTime,
-                        "IMAGE_BLOCKED", messageText = cacheKey)
+                        "IMAGE_BLOCKED", messageText = cacheKey,
+                        deliveryStatus = NotificationDeliveryStatus.NOT_POSTED_FILTERED.name,
+                        deliveryDetail = "Images disabled; no matched contact bypass.")
                 }
                 NotificationDeliveryDecision.FORWARD -> {
-                    notificationPublisher.publish(
+                    processingDao.setState(originalKey, "POSTING", System.currentTimeMillis())
+                    review(jobId, packageName, title, displayContent, sbn.postTime,
+                        systemDecision, modelConfidence, inferredCategory, cacheKey,
+                        NotificationDeliveryStatus.POSTING.name)
+                    val delivery = notificationPublisher.publish(
                         packageName, title,
                         content.ifBlank { if (hasImage) "Image attachment" else "" },
                         contentIntent, originalKey, sbn.id, sbn.notification.category,
+                        sourceFingerprint = signature, originalVisibility = sbn.notification.visibility,
+                        codeText = NotificationCodeText.latest(sbn.notification),
                     )
-                    log(jobId, packageName, title, content, "PUBLISHED", reason)
+                    log(jobId, packageName, title, content,
+                        if (delivery.posted) "PUBLISHED" else delivery.status.name,
+                        if (delivery.posted) reason else delivery.status.label)
                     review(jobId, packageName, title, displayContent, sbn.postTime,
-                        systemDecision, modelConfidence, inferredCategory, cacheKey)
+                        systemDecision, modelConfidence, inferredCategory, cacheKey,
+                        delivery.status.name, delivery.detail)
                 }
             }
+        }
+
+        // Android 15 OTP sanitization can persist even when unlocked. The placeholder
+        // is neither an OTP keyword nor usable training content. Alert using only
+        // a generic message; source apps may have been silenced during setup.
+        if (hiddenContent) {
+            log(jobId, packageName, title, "", "CONTENT_HIDDEN", "Android hid the notification text")
+            if (!preferences.hiddenContentAlertsEnabled) {
+                review(jobId, packageName, title, "Content hidden by Android", sbn.postTime, "CONTENT_HIDDEN",
+                    deliveryStatus = NotificationDeliveryStatus.CONTENT_HIDDEN.name,
+                    deliveryDetail = "Hidden content alerts are off. Open the original app to read this message.")
+                return
+            }
+            // Neither image rules nor lock-screen deferral can decide whether
+            // unavailable content is safe to discard. Preserve the source alert.
+            processingDao.setState(originalKey, "POSTING", System.currentTimeMillis())
+            review(jobId, packageName, title, "Content hidden by Android", sbn.postTime, "CONTENT_HIDDEN",
+                deliveryStatus = NotificationDeliveryStatus.POSTING.name)
+            val delivery = notificationPublisher.publishHiddenContent(packageName, contentIntent,
+                originalKey, sbn.id, signature, sbn.notification.visibility)
+            val detail = if (delivery.posted)
+                "Content hidden — alert posted. Open the original app to read it. ${delivery.detail}"
+            else "Content hidden — alert could not be posted. ${delivery.status.label}. ${delivery.detail}"
+            log(jobId, packageName, title, "", if (delivery.posted) "PUBLISHED" else delivery.status.name, detail)
+            review(jobId, packageName, title, "Content hidden by Android", sbn.postTime, "CONTENT_HIDDEN",
+                deliveryStatus = delivery.status.name, deliveryDetail = detail)
+            return
         }
 
         // Locked screen + sender-marked-sensitive (VISIBILITY_PRIVATE). Behaviour is governed
@@ -242,10 +420,9 @@ class ZigNotificationListenerService : NotificationListenerService() {
         //    If images are disabled and the sender isn't a matched contact, defer too:
         //    redacted metadata cannot prove that a private notification has no image.
         //
-        //  • OFF — defer: Android delivers redacted text ("sensitive content" placeholder) to
-        //    listeners while locked, so classifying now is meaningless. Record the key, publish
-        //    nothing (no disturbance), and re-fetch the full content to classify on unlock
-        //    (see processDeferredOnUnlock).
+        //  • OFF — defer by user preference and re-fetch content on unlock.
+        //    VISIBILITY_PRIVATE alone does not prove that Android hid the text;
+        //    Android 15 OTP sanitization is detected separately above.
         if (privateWhileLocked) {
             if (preferences.sensitiveNotificationsEnabled && contactMatched) {
                 log(jobId, packageName, title, content, "CONTACT_PASS",
@@ -274,17 +451,19 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         // Gate 3: keyword blocklist (Tier 2a — deterministic, mute immediately)
         // Checked before the allowlist so an explicit block always wins.
-        if (NativeBridge.containsBlocklistedKeyword(text)) {
+        val keywordMatch = NativeBridge.matchKeywords(text)
+        if (keywordMatch == NativeBridge.KeywordMatch.BLOCK) {
             log(jobId, packageName, title, content, "KEYWORD_BLOCKED",
                 "Body matched a blocked keyword rule — silenced")
-            review(jobId, packageName, title, displayContent, sbn.postTime, "KEYWORD_BLOCKED", messageText = cacheKey)
+            review(jobId, packageName, title, displayContent, sbn.postTime, "KEYWORD_BLOCKED", messageText = cacheKey,
+                deliveryStatus = NotificationDeliveryStatus.NOT_POSTED_FILTERED.name)
             return
         }
         log(jobId, packageName, title, content, "BLOCKLIST_MISS",
             "No blocked keyword matched")
 
         // Gate 4: keyword allowlist (Tier 2b — deterministic, pass immediately)
-        if (NativeBridge.containsWhitelistedKeyword(text)) {
+        if (keywordMatch == NativeBridge.KeywordMatch.ALLOW) {
             log(jobId, packageName, title, content, "KEYWORD_PASS",
                 "Body matched an allowed keyword rule")
             publishAllowed("KEYWORD_PASS", "Forwarded to user via keyword match")
@@ -314,7 +493,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
 
         val result = try {
             ensembleClassifier.evaluate(category, packageName, text, cacheKey)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            AppErrors.report("Classifying notification", e)
             log(jobId, packageName, title, content, "MODEL_ERROR",
                 "Inference failed: ${e.message} — failing open")
             // Fail open: allow the notification and record zero confidence so the
@@ -443,8 +623,10 @@ class ZigNotificationListenerService : NotificationListenerService() {
         modelConfidence: Float = 0f,
         inferredCategory: String = "UNKNOWN",
         messageText: String = "",
+        deliveryStatus: String = "NOT_POSTED_FILTERED",
+        deliveryDetail: String = "",
     ) {
-        reviewDao.insert(
+        reviewDao.upsertPipeline(
             NotificationReviewEntity(
                 jobId = jobId,
                 packageName = packageName,
@@ -455,6 +637,8 @@ class ZigNotificationListenerService : NotificationListenerService() {
                 modelConfidence = modelConfidence,
                 inferredCategory = inferredCategory,
                 messageText = messageText,
+                deliveryStatus = deliveryStatus,
+                deliveryDetail = deliveryDetail,
             ),
         )
     }

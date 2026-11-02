@@ -31,9 +31,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -51,9 +54,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
 import androidx.hilt.navigation.compose.hiltViewModel
-import dev.zig.notificationfilter.ui.theme.ZigGreen
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 private val CARD_SHAPE = RoundedCornerShape(28.dp)
@@ -71,14 +74,19 @@ private const val VISIBLE_CARDS = 3
 fun DailyReviewScreen(
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    viewModel: DailyReviewViewModel = hiltViewModel(),
 ) {
-    val viewModel: DailyReviewViewModel = hiltViewModel()
     val uiState by viewModel.uiState.collectAsState()
     val packageLabels by viewModel.packageLabels.collectAsState()
     val appIcons by viewModel.appIcons.collectAsState()
+    val snackbar = remember { SnackbarHostState() }
+    SafeLaunchedEffect(viewModel) {
+        viewModel.messages.collect { snackbar.showSnackbar(it) }
+    }
 
     Scaffold(
         modifier = modifier,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Daily Review", style = MaterialTheme.typography.titleLarge) },
@@ -196,6 +204,7 @@ private fun TopSwipeableCard(
     Surface(
         modifier = Modifier
             .fillMaxSize()
+            .testTag("daily-review-card")
             .graphicsLayer {
                 translationX = offsetX.value
                 rotationZ = (offsetX.value / widthPx) * MAX_ROTATION_DEG
@@ -204,19 +213,21 @@ private fun TopSwipeableCard(
                 detectHorizontalDragGestures(
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
-                        scope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
+                        scope.launchSafely("Updating screen") { offsetX.snapTo(offsetX.value + dragAmount) }
                     },
                     onDragEnd = {
                         when {
-                            offsetX.value > threshold -> scope.launch {
+                            offsetX.value > threshold -> scope.launchSafely("Updating screen") {
                                 offsetX.animateTo(flyOff, tween(durationMillis = 220))
                                 onDecision(true)
+                                offsetX.snapTo(0f)
                             }
-                            offsetX.value < -threshold -> scope.launch {
+                            offsetX.value < -threshold -> scope.launchSafely("Updating screen") {
                                 offsetX.animateTo(-flyOff, tween(durationMillis = 220))
                                 onDecision(false)
+                                offsetX.snapTo(0f)
                             }
-                            else -> scope.launch {
+                            else -> scope.launchSafely("Updating screen") {
                                 offsetX.animateTo(
                                     targetValue = 0f,
                                     animationSpec = spring(
@@ -240,7 +251,7 @@ private fun TopSwipeableCard(
             // Right drag → Allow (green). Left drag → Block (red). Progress is read inside the
             // graphicsLayer blocks, so dragging only re-draws — it never recomposes the card.
             SwipeOverlay(
-                color = ZigGreen,
+                color = MaterialTheme.colorScheme.primary,
                 stamp = "ALLOW",
                 stampAlignment = Alignment.TopStart,
                 stampRotation = -18f,
@@ -314,14 +325,14 @@ private fun CardContent(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(ZigGreen.copy(alpha = 0.15f)),
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = label.take(1).uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = ZigGreen,
+                        color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
@@ -384,7 +395,7 @@ private fun CardContent(
                 text = "Allow →",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = ZigGreen,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -405,13 +416,13 @@ private fun AllCaughtUp(
             modifier = Modifier
                 .size(120.dp)
                 .clip(RoundedCornerShape(percent = 50))
-                .background(ZigGreen.copy(alpha = 0.15f)),
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 imageVector = Icons.Default.Check,
                 contentDescription = null,
-                tint = ZigGreen,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(72.dp),
             )
         }

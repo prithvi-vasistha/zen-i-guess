@@ -38,8 +38,9 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import dev.zig.notificationfilter.ui.common.themedDoodlePainter
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -65,7 +66,6 @@ import dev.zig.notificationfilter.data.local.db.KeywordRuleEntity
 import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
-import dev.zig.notificationfilter.ui.theme.ZigGreen
 import dev.zig.notificationfilter.ui.tour.TourOverlay
 import dev.zig.notificationfilter.ui.tour.TourStep
 import dev.zig.notificationfilter.ui.tour.rememberTourController
@@ -111,8 +111,8 @@ fun CustomRulesScreen(
     val activeRules = if (isAllowTab) allowRules else blockRules
     val activeType = if (isAllowTab) KeywordRuleType.ALLOW else KeywordRuleType.BLOCK
     val activeSuggestions = if (isAllowTab) ALLOW_SUGGESTIONS else BLOCK_SUGGESTIONS
-    val activeColor = if (isAllowTab) ZigGreen else MaterialTheme.colorScheme.error
-    val activeContainerColor = if (isAllowTab) ZigGreen.copy(alpha = 0.10f) else MaterialTheme.colorScheme.errorContainer
+    val activeColor = if (isAllowTab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+    val activeContainerColor = if (isAllowTab) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.errorContainer
     val helperText = if (isAllowTab) "Words containing these will NEVER be blocked."
                      else "Words containing these will ALWAYS be silenced."
     val inputPlaceholder = if (isAllowTab) "Type an absolute safety word..." else "Type a word to auto-silence..."
@@ -123,7 +123,7 @@ fun CustomRulesScreen(
         activeSuggestions.filter { it !in usedKeywords }
     }
 
-    LaunchedEffect(editingRuleId) {
+    SafeLaunchedEffect(editingRuleId) {
         if (editingRuleId != null) focusRequester.requestFocus()
     }
 
@@ -181,7 +181,7 @@ fun CustomRulesScreen(
                     }
                 },
                 modifier = Modifier.tourTarget(tourController, RULES_ALLOW_TAB_KEY),
-                selectedContentColor = ZigGreen,
+                selectedContentColor = MaterialTheme.colorScheme.primary,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Text(
@@ -284,7 +284,7 @@ fun CustomRulesScreen(
                         "Add keywords above to always silence matching notifications.",
                     doodle = {
                         Image(
-                            painter = painterResource(R.drawable.ic_empty_rules),
+                            painter = themedDoodlePainter(R.drawable.ic_empty_rules),
                             contentDescription = null,
                         )
                     },

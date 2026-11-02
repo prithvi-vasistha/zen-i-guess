@@ -12,7 +12,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.FilterState
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.local.db.ManagedAppEntity
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
@@ -24,13 +24,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.recoverErrors
+import dev.zig.notificationfilter.core.errors.launchSafely
+import kotlinx.coroutines.withContext
+import dev.zig.notificationfilter.domain.NotificationHealth
 import javax.inject.Inject
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 @HiltViewModel
 class ManagedAppsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val managedAppDao: ManagedAppDao,
+    private val filterState: FilterState,
+    private val notificationHealth: NotificationHealth,
     private val preferences: ZigUserPreferences,
 ) : ViewModel() {
 
@@ -81,7 +87,8 @@ class ManagedAppsViewModel @Inject constructor(
                     ),
             )
         }
-    }.stateIn(
+    }.recoverErrors("Loading managed apps")
+        .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = UiState(isLoading = true),
@@ -93,8 +100,10 @@ class ManagedAppsViewModel @Inject constructor(
     val setupBannerVisible: StateFlow<Boolean> = _setupBannerVisible.asStateFlow()
 
     fun dismissSetupBanner() {
-        preferences.setupBannerDismissed = true
-        _setupBannerVisible.value = false
+        AppErrors.run("Saving setup banner preference") {
+            preferences.setupBannerDismissed = true
+            _setupBannerVisible.value = false
+        }
     }
 
     init {
@@ -102,7 +111,7 @@ class ManagedAppsViewModel @Inject constructor(
     }
 
     private fun loadInstalledApps() {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Loading installed apps", Dispatchers.IO) {
             val pm = context.packageManager
             val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             // queryIntentActivities(Intent, int) is deprecated in API 33; use ResolveInfoFlags above it.
@@ -143,14 +152,21 @@ class ManagedAppsViewModel @Inject constructor(
     }
 
     fun setManaged(packageName: String, isManaged: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Saving managed apps", Dispatchers.IO) {
             if (isManaged) {
                 managedAppDao.insert(ManagedAppEntity(packageName))
-                NativeBridge.addAppToManaged(packageName)
             } else {
                 managedAppDao.delete(ManagedAppEntity(packageName))
-                NativeBridge.removeAppFromManaged(packageName)
             }
+            filterState.refresh()
+        }
+    }
+
+    fun useOriginalAlerts(packageName: String) {
+        viewModelScope.launchSafely("Using original alerts", Dispatchers.IO) {
+            managedAppDao.delete(ManagedAppEntity(packageName))
+            filterState.refresh()
+            withContext(Dispatchers.Main) { notificationHealth.openAppNotifications(packageName) }
         }
     }
 }

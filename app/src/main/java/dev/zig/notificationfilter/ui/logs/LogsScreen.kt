@@ -48,13 +48,12 @@ import dev.zig.notificationfilter.data.local.db.NotificationLogEntity
 import dev.zig.notificationfilter.ui.common.ClipboardDoodle
 import dev.zig.notificationfilter.ui.common.ScrollFab
 import dev.zig.notificationfilter.ui.common.ZigEmptyState
-import dev.zig.notificationfilter.ui.theme.ZigGreen
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 // Pipeline stage colors
-private val COLOR_GREEN = ZigGreen
+private val COLOR_GREEN = Color(0xFF4CAF50)
 private val COLOR_RED = Color(0xFFE57373)
 private val COLOR_AMBER = Color(0xFFFFB74D)
 private val COLOR_BLUE = Color(0xFF64B5F6)
@@ -67,7 +66,9 @@ private fun statusColor(status: String): Color = when (status) {
     "CONTACT_PASS", "KEYWORD_PASS", "MODEL_ALLOWED", "PUBLISHED",
     "LLM_ALLOWED" -> COLOR_GREEN
     "MODEL_INVOKED", "LLM_INVOKED" -> COLOR_AMBER
-    "MODEL_ERROR" -> COLOR_RED
+    "MODEL_ERROR", "PIPELINE_ERROR", "NOT_POSTED_PERMISSION", "NOT_POSTED_APP_BLOCKED",
+    "NOT_POSTED_CHANNEL_BLOCKED", "NOT_POSTED_ERROR" -> COLOR_RED
+    "LOCKED_DEFERRED", "CONTENT_HIDDEN" -> COLOR_AMBER
     else -> COLOR_NEUTRAL
 }
 
@@ -136,7 +137,7 @@ fun LogsScreen(modifier: Modifier = Modifier) {
                         modifier = Modifier
                             .padding(12.dp)
                             .size(24.dp),
-                        color = ZigGreen,
+                        color = MaterialTheme.colorScheme.primary,
                         strokeWidth = 2.dp,
                     )
                     query.isNotEmpty() -> IconButton(onClick = { viewModel.setQuery("") }) {
@@ -152,7 +153,7 @@ fun LogsScreen(modifier: Modifier = Modifier) {
         when {
             traces.isEmpty() && isSearchingDb -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = ZigGreen)
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
             traces.isEmpty() -> {

@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.domain.backup
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import dev.zig.notificationfilter.data.preferences.AppearancePreferences
 
 /**
  * The on-disk JSON shape written by [BackupRestoreManager]. Fully offline and
@@ -17,7 +18,8 @@ import kotlinx.serialization.Serializable
  * @property version           schema version. Bumped on a shape change so [BackupRestoreManager]
  *                             can refuse a file it cannot read. v2 added managedApps,
  *                             keywordRules and categoryOverrides; v3 added keywordRulesV2
- *                             carrying the rule type (ALLOW / BLOCK); v4 added the image toggle.
+ *                             carrying the rule type (ALLOW / BLOCK); v4 added the image toggle;
+ *                             v5 added appearance settings.
  * @property exportDate        Unix epoch seconds the file was written. Informational only.
  * @property preferences       user-facing notification settings. Internal lifecycle flags
  *                             (onboarding, seeding guards, terms) are intentionally excluded —
@@ -43,7 +45,7 @@ data class BackupPayload(
 ) {
     companion object {
         /** The schema version this build writes and is able to read. */
-        const val CURRENT_VERSION = 4
+        const val CURRENT_VERSION = 5
     }
 }
 
@@ -68,7 +70,20 @@ data class BackupPreferences(
     @SerialName("daily_summary_minute") val dailySummaryMinute: Int = 0,
     @SerialName("sensitive_notifications_enabled") val sensitiveNotificationsEnabled: Boolean,
     @SerialName("image_notifications_enabled") val imageNotificationsEnabled: Boolean = true,
+    // Older backups cannot express this choice; preserve the current preference.
+    @SerialName("hidden_content_alerts_enabled") val hiddenContentAlertsEnabled: Boolean? = null,
+    // An absent appearance section in an older backup leaves the user's current theme intact.
+    val appearance: BackupAppearance? = null,
 )
+
+@Serializable
+data class BackupAppearance(
+    val mode: String = "system",
+    val style: String = "zig",
+    val accent: String = "green",
+) {
+    fun toPreferences() = AppearancePreferences.fromIds(mode, style, accent)
+}
 
 /**
  * One manual override the user made. On import this is reconstructed as a synthetic

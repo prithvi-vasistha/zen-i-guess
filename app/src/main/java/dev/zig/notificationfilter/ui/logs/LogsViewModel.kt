@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.recoverErrors
+import dev.zig.notificationfilter.core.errors.launchSafely
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -81,6 +82,7 @@ class LogsViewModel @Inject constructor(
             }
         }
         .flowOn(Dispatchers.Default)
+        .recoverErrors("Loading notification logs")
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -90,7 +92,7 @@ class LogsViewModel @Inject constructor(
     fun setQuery(query: String) { searchQuery.value = query }
 
     fun clearLogs() {
-        viewModelScope.launch(Dispatchers.IO) { dao.deleteAll() }
+        viewModelScope.launchSafely("Clearing notification logs", Dispatchers.IO) { dao.deleteAll() }
     }
 
     private fun buildTraces(logs: List<NotificationLogEntity>): List<NotificationTrace> =

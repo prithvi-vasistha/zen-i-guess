@@ -44,6 +44,9 @@ class EnsembleClassifierTest {
         private val overridesByKey: Map<String, String> = emptyMap(),
     ) : NotificationReviewDao {
         override suspend fun insert(entity: NotificationReviewEntity) = Unit
+        override suspend fun getByJobId(jobId: String): NotificationReviewEntity? = null
+        override suspend fun update(entity: NotificationReviewEntity) = Unit
+        override suspend fun updateDelivery(jobId: String, status: String, detail: String) = Unit
         override fun getFilteredNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override fun getPendingReviewFlow(): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override suspend fun updateReviewState(id: Long, state: String) = Unit
@@ -52,11 +55,14 @@ class EnsembleClassifierTest {
         override suspend fun updateUserAssignedCategory(id: Long, category: String?) = Unit
         override suspend fun getById(id: Long): NotificationReviewEntity? = null
         override suspend fun updateEmbedding(id: Long, embedding: FloatArray?) = Unit
+        override suspend fun updateEmbeddingBlob(id: Long, embedding: ByteArray?) = Unit
+        override suspend fun updateMessageText(id: Long, text: String) = Unit
         override suspend fun getPersonalMemory(): List<NotificationReviewEntity> = emptyList()
         override fun getArchivedNotificationsFlow(cutoffTimestamp: Long): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override fun searchActiveFlow(cutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override fun searchArchiveFlow(archiveCutoffTimestamp: Long, query: String): Flow<List<NotificationReviewEntity>> = emptyFlow()
         override suspend fun countReviewableToday(startOfDayMs: Long): Int = 0
+        override suspend fun countReviewableBetween(startOfDayMs: Long, scheduledAtMs: Long): Int = 0
         override suspend fun getUnprocessedReviews(): List<NotificationReviewEntity> = emptyList()
         override suspend fun markAsExported(ids: List<Long>) = Unit
         override suspend fun getExactMatchOverride(text: String): NotificationReviewEntity? =
@@ -69,7 +75,6 @@ class EnsembleClassifierTest {
             }
         override suspend fun getAllOverrides(): List<NotificationReviewEntity> = emptyList()
         override suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long> = emptyList()
-        override suspend fun deleteRestored() = Unit
         override suspend fun clearAiMemory() = Unit
         override suspend fun cascadeOverride(
             packageName: String,

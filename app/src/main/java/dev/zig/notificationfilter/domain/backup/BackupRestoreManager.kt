@@ -1,6 +1,6 @@
 package dev.zig.notificationfilter.domain.backup
 
-import dev.zig.notificationfilter.data.local.NativeBridge
+import dev.zig.notificationfilter.data.local.FilterState
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideDao
 import dev.zig.notificationfilter.data.local.db.AppCategoryOverrideEntity
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
@@ -51,7 +51,7 @@ data class RestoreResult(
  * Restore is non-destructive (merge/union): it adds to the target device without removing
  * anything already there, and re-importing the same file is idempotent. Two details matter:
  *
- *  - Managed apps and keyword rules also live in the Rust filter engine ([NativeBridge]),
+ *  - Managed apps and keyword rules also live in the Rust filter engine ([FilterState]),
  *    which the notification service actually consults. Writing Room is not enough, so restore
  *    re-syncs the engine exactly as ZigApp does on cold start.
  *  - Each override is reconstructed as a synthetic review row tagged `systemDecision =
@@ -64,6 +64,7 @@ data class RestoreResult(
 class BackupRestoreManager @Inject constructor(
     private val dao: NotificationReviewDao,
     private val managedAppDao: ManagedAppDao,
+    private val filterState: FilterState,
     private val keywordRuleDao: KeywordRuleDao,
     private val categoryOverrideDao: AppCategoryOverrideDao,
     private val preferences: ZigUserPreferences,
@@ -89,8 +90,14 @@ class BackupRestoreManager @Inject constructor(
             exportDate = System.currentTimeMillis() / 1000,
             preferences = BackupPreferences(
                 dailySummaryEnabled = preferences.dailySummaryEnabled,
+                dailySummaryHour = preferences.dailySummaryHour,
+                dailySummaryMinute = preferences.dailySummaryMinute,
                 sensitiveNotificationsEnabled = preferences.sensitiveNotificationsEnabled,
                 imageNotificationsEnabled = preferences.imageNotificationsEnabled,
+                hiddenContentAlertsEnabled = preferences.hiddenContentAlertsEnabled,
+                appearance = preferences.appearance.value.let {
+                    BackupAppearance(it.mode.id, it.style.id, it.accent.id)
+                },
             ),
             managedApps = managedAppDao.getAllPackageNames(),
             keywordRules = keywordSnapshot.map { it.conditions },
@@ -102,7 +109,9 @@ class BackupRestoreManager @Inject constructor(
             },
             racMemory = dao.getAllOverrides().map { row ->
                 RacMemoryEntry(
-                    messageText = row.messageText,
+                    messageText = row.messageText.ifBlank {
+                        listOf(row.title, row.content).filter(String::isNotBlank).joinToString(" ")
+                    },
                     userOverrideStatus = row.userOverrideStatus,
                     userAssignedCategory = row.userAssignedCategory,
                     packageName = row.packageName,
@@ -132,10 +141,13 @@ class BackupRestoreManager @Inject constructor(
 
         // 1. Preferences. Write time first so reschedule() reads the restored values.
         preferences.dailySummaryEnabled = payload.preferences.dailySummaryEnabled
+        preferences.dailySummaryPermissionPending = false
         preferences.dailySummaryHour = payload.preferences.dailySummaryHour
         preferences.dailySummaryMinute = payload.preferences.dailySummaryMinute
         preferences.sensitiveNotificationsEnabled = payload.preferences.sensitiveNotificationsEnabled
         preferences.imageNotificationsEnabled = payload.preferences.imageNotificationsEnabled
+        payload.preferences.hiddenContentAlertsEnabled?.let { preferences.hiddenContentAlertsEnabled = it }
+        payload.preferences.appearance?.let { preferences.setAppearance(it.toPreferences()) }
         // reschedule() (CANCEL_AND_REENQUEUE) rather than schedule() (KEEP) so the restored
         // time is picked up even if a job was already running at the old time.
         if (payload.preferences.dailySummaryEnabled) dailySummaryScheduler.reschedule()
@@ -147,7 +159,6 @@ class BackupRestoreManager @Inject constructor(
         var managedAppsAdded = 0
         payload.managedApps.forEach { pkg ->
             managedAppDao.insert(ManagedAppEntity(pkg))
-            NativeBridge.addAppToManaged(pkg)
             if (pkg !in existingApps) managedAppsAdded++
         }
 
@@ -169,40 +180,37 @@ class BackupRestoreManager @Inject constructor(
                 keywordRulesAdded++
             }
         }
-        // Rebuild both Rust sets from the merged Room snapshot.
-        NativeBridge.clearKeywordWhitelist()
-        NativeBridge.clearKeywordBlocklist()
-        keywordRuleDao.getAllSnapshot().forEach { rule ->
-            val joined = rule.conditions.joinToString("||")
-            if (rule.ruleType == KeywordRuleType.BLOCK.name) {
-                NativeBridge.addKeywordRuleToBlocklist(joined)
-            } else {
-                NativeBridge.addKeywordRuleToWhitelist(joined)
-            }
-        }
+        filterState.refresh()
 
         // 4. Category overrides (upsert — REPLACE by packageName).
         payload.categoryOverrides.forEach {
             categoryOverrideDao.upsert(AppCategoryOverrideEntity(it.packageName, it.defaultCategory))
         }
 
-        // 5. Override corpus. Drop any prior restore first so re-importing is idempotent.
+        // 5. Save all text/verdicts atomically before rebuilding vectors. Keep local and
+        //    previously imported memory, including when this file contains no decisions.
         val entries = payload.racMemory
         val rows = entries.map { it.toRestoredEntity() }
-        dao.deleteRestored()
-        val ids = dao.restoreOverrides(rows)
+        val ids = dao.mergeRestoredOverrides(rows)
+        personalMemory.reload()
 
         // 6. Re-embed each restored row from its text so it can rejoin the KNN corpus.
         //    A blank/failed embedding is skipped — the row still serves the exact-match layer.
         var embedded = 0
-        entries.forEachIndexed { index, entry ->
-            val vector = embedder.embed(entry.messageText) ?: return@forEachIndexed
-            dao.updateEmbedding(ids[index], vector)
-            embedded++
+        try {
+            entries.forEachIndexed { index, entry ->
+                if (dao.getById(ids[index])?.embedding != null) {
+                    embedded++
+                    return@forEachIndexed
+                }
+                val vector = embedder.embed(entry.messageText) ?: return@forEachIndexed
+                dao.updateEmbedding(ids[index], vector)
+                embedded++
+            }
+        } finally {
+            // Include every successfully rebuilt vector even if the remaining work failed.
+            personalMemory.reload()
         }
-
-        // 7. Refresh the in-memory corpus cache so restored memory takes effect immediately.
-        personalMemory.reload()
 
         RestoreResult(
             overridesRestored = rows.size,

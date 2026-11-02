@@ -2,6 +2,7 @@ package dev.zig.notificationfilter.ui.dailyreview
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.ViewModel
@@ -12,15 +13,19 @@ import dev.zig.notificationfilter.data.local.db.NotificationReviewDao
 import dev.zig.notificationfilter.data.local.db.ReviewState
 import dev.zig.notificationfilter.domain.memory.PersonalMemory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.receiveAsFlow
+import dev.zig.notificationfilter.core.errors.launchSafely
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 // One flashcard = one deduplicated group of identical notifications (same package, title,
 // and content). [ids] holds every underlying row so a single swipe decides all of them.
@@ -52,6 +57,8 @@ class DailyReviewViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<DailyReviewUiState>(DailyReviewUiState.Loading)
     val uiState: StateFlow<DailyReviewUiState> = _uiState.asStateFlow()
+    private val _messages = Channel<String>(Channel.UNLIMITED)
+    val messages = _messages.receiveAsFlow()
 
     private val labelCache = ConcurrentHashMap<String, String>()
     private val _packageLabels = MutableStateFlow<Map<String, String>>(emptyMap())
@@ -69,7 +76,7 @@ class DailyReviewViewModel @Inject constructor(
     // notifications into single cards. groupBy preserves first-seen order and the DAO returns
     // newest-first, so the freshest groups sit at the top of the deck.
     private fun loadDeck() {
-        viewModelScope.launch {
+        viewModelScope.launchSafely("Loading daily review") {
             val startOfDayMs = LocalDate.now()
                 .atStartOfDay(ZoneId.systemDefault())
                 .toInstant()
@@ -106,6 +113,7 @@ class DailyReviewViewModel @Inject constructor(
     // would only add duplicate vectors to the KNN corpus).
     fun onDecision(card: DailyReviewCard, allow: Boolean) {
         val current = (_uiState.value as? DailyReviewUiState.Deck)?.cards ?: return
+        if (current.none { it.key == card.key }) return
         val remaining = current.filterNot { it.key == card.key }
         _uiState.value = if (remaining.isEmpty()) {
             DailyReviewUiState.AllCaughtUp
@@ -113,12 +121,27 @@ class DailyReviewViewModel @Inject constructor(
             DailyReviewUiState.Deck(remaining)
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launchSafely("Saving daily review decision", Dispatchers.IO) {
             val state = if (allow) ReviewState.ALLOWED else ReviewState.BLOCKED
             val status = if (allow) "MANUALLY_ALLOWED" else "MANUALLY_BLOCKED"
-            // Status written first: rememberOverride reads it back to label the embedding.
-            dao.applyDecisionToIds(card.ids, state.name, status)
-            personalMemory.rememberOverride(card.ids.first())
+            var saved = false
+            try {
+                // Status written first: rememberOverride reads it back to label the embedding.
+                dao.applyDecisionToIds(card.ids, state.name, status)
+                saved = true
+                personalMemory.rememberOverride(card.ids.first())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                AppErrors.report("Saving daily review decision", e)
+                Log.e("DailyReview", "Could not record review decision", e)
+                if (!saved) withContext(Dispatchers.Main) {
+                    val cards = (_uiState.value as? DailyReviewUiState.Deck)?.cards.orEmpty()
+                    _uiState.value = DailyReviewUiState.Deck(listOf(card) + cards)
+                }
+                _messages.send(if (saved) "Decision saved. Learning couldn't finish; please try again later."
+                    else "Couldn't save your decision. Please try again.")
+            }
         }
     }
 
@@ -130,7 +153,10 @@ class DailyReviewViewModel @Inject constructor(
                 labelCache[pkg] = try {
                     val info = context.packageManager.getApplicationInfo(pkg, 0)
                     context.packageManager.getApplicationLabel(info).toString()
-                } catch (_: Exception) {
+                } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                    pkg.substringAfterLast('.')
+                } catch (failure: Throwable) {
+                    AppErrors.report("Loading review app name", failure, 60_000L)
                     pkg.substringAfterLast('.')
                 }
                 loadIcon(pkg)?.let { iconCache[pkg] = it }
@@ -149,7 +175,10 @@ class DailyReviewViewModel @Inject constructor(
         drawable.setBounds(0, 0, 48, 48)
         drawable.draw(canvas)
         bitmap.asImageBitmap()
-    } catch (_: Exception) {
+    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+        null
+    } catch (failure: Throwable) {
+        AppErrors.report("Loading review app icon", failure, 60_000L)
         null
     }
 }

@@ -51,6 +51,7 @@ android {
     }
 
     // Prevent AGP from compressing the TFLite model inside the APK.
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
     // Without this, memory-mapping the model via AssetFileDescriptor fails at runtime.
     aaptOptions {
         noCompress.add("tflite")
@@ -92,8 +93,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.work.runtime.ktx)
-    // hilt-work: required for @HiltWorker / HiltWorkerFactory so Hilt can inject
-    // dependencies into CoroutineWorker subclasses via DailySummaryWorker.
+    // Keep the Hilt-aware factory for WorkManager compatibility across app updates.
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
 

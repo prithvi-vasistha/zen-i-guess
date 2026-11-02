@@ -4,13 +4,37 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
+import java.util.Locale
 
 @Dao
 interface NotificationReviewDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(entity: NotificationReviewEntity)
+
+    @Query("SELECT * FROM notification_review WHERE jobId = :jobId LIMIT 1")
+    suspend fun getByJobId(jobId: String): NotificationReviewEntity?
+
+    @Update
+    suspend fun update(entity: NotificationReviewEntity)
+
+    // A deferred notification becomes one completed card, preserving any existing user state.
+    @Transaction
+    suspend fun upsertPipeline(entity: NotificationReviewEntity) {
+        val previous = getByJobId(entity.jobId)
+        if (previous == null) insert(entity) else update(previous.copy(
+            title = entity.title, content = entity.content, systemDecision = entity.systemDecision,
+            modelConfidence = entity.modelConfidence, inferredCategory = entity.inferredCategory,
+            messageText = entity.messageText, deliveryStatus = entity.deliveryStatus,
+            deliveryDetail = entity.deliveryDetail,
+        ))
+    }
+
+    @Query("UPDATE notification_review SET deliveryStatus = :status, deliveryDetail = :detail WHERE jobId = :jobId")
+    suspend fun updateDelivery(jobId: String, status: String, detail: String)
 
     // Active review inbox: classifier-suppressed notifications within the rolling 24-hour window.
     // MANAGED_FAIL rows are excluded — those notifications never passed the managed-apps gate
@@ -59,9 +83,17 @@ interface NotificationReviewDao {
     @Query("SELECT * FROM notification_review WHERE id = :id")
     suspend fun getById(id: Long): NotificationReviewEntity?
 
-    // Persists (or clears, when null) the embedding vector for one review row.
+    // Bind a single BLOB: Room treats a FloatArray query parameter as a list and expands
+    // it into SQL placeholders, even though entity fields use FloatArrayConverter.
     @Query("UPDATE notification_review SET embedding = :embedding WHERE id = :id")
-    suspend fun updateEmbedding(id: Long, embedding: FloatArray?)
+    suspend fun updateEmbeddingBlob(id: Long, embedding: ByteArray?)
+
+    suspend fun updateEmbedding(id: Long, embedding: FloatArray?) {
+        updateEmbeddingBlob(id, FloatArrayConverter().fromFloatArray(embedding))
+    }
+
+    @Query("UPDATE notification_review SET messageText = :text WHERE id = :id")
+    suspend fun updateMessageText(id: Long, text: String)
 
     // The vector-search corpus: every row the user has explicitly overridden AND
     // for which an embedding has been computed. Bounded by the number of manual
@@ -94,7 +126,8 @@ interface NotificationReviewDao {
     @Query("""
         SELECT * FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED',
-                                 'CONTACT_PASS', 'KEYWORD_PASS', 'KEYWORD_BLOCKED', 'IMAGE_BLOCKED')
+                                 'CONTACT_PASS', 'KEYWORD_PASS', 'KEYWORD_BLOCKED', 'IMAGE_BLOCKED',
+                                 'LOCKED_PASS', 'LOCKED_DEFERRED', 'CONTENT_HIDDEN', 'PIPELINE_ERROR')
         AND reviewState != 'DISMISSED'
         AND timestamp >= :cutoffTimestamp
         AND (packageName LIKE '%' || :query || '%'
@@ -145,13 +178,22 @@ interface NotificationReviewDao {
     )
 
     // Count of reviewable notifications (MODEL_BLOCKED + PUBLISHED) with a timestamp on or
-    // after startOfDayMs. Used by DailySummaryWorker to populate the notification body.
+    // after startOfDayMs. Retained for existing count consumers.
     @Query("""
         SELECT COUNT(*) FROM notification_review
         WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
         AND timestamp >= :startOfDayMs
     """)
     suspend fun countReviewableToday(startOfDayMs: Long): Int
+
+    // The recap belongs to its scheduled date even if Android delivers it after midnight.
+    @Query("""
+        SELECT COUNT(*) FROM notification_review
+        WHERE systemDecision IN ('LLM_BLOCKED', 'MODEL_BLOCKED', 'PUBLISHED')
+        AND timestamp >= :startOfDayMs AND timestamp <= :scheduledAtMs
+        AND jobId NOT LIKE 'demo-%'
+    """)
+    suspend fun countReviewableBetween(startOfDayMs: Long, scheduledAtMs: Long): Int
 
     // Called by the retraining WorkManager to fetch only rows that need to be
     // written to the master training CSV — avoids scanning the full table nightly.
@@ -179,30 +221,37 @@ interface NotificationReviewDao {
     // ── Backup / Restore ───────────────────────────────────────────────────────
 
     // Every real row the user has explicitly overridden — the exportable RAC corpus.
-    // Carries text only (no embedding), so rows with a blank messageText are useless (they
-    // can neither exact-match nor re-embed) and are excluded. Demo rows (jobId 'demo-…') are
+    // Older database versions did not store messageText; their title/content can still
+    // reconstruct the learned text. Demo rows (jobId 'demo-…') are
     // seeded illustrations, not the user's data, and are excluded too — mirroring the way
     // PersonalMemoryRepository already skips them from the KNN corpus.
     @Query("""
         SELECT * FROM notification_review
         WHERE userOverrideStatus != 'NONE'
-        AND messageText != ''
+        AND (messageText != '' OR title != '' OR content != '')
         AND jobId NOT LIKE 'demo-%'
     """)
     suspend fun getAllOverrides(): List<NotificationReviewEntity>
 
-    // Bulk-inserts restored overrides and returns the newly-assigned row ids (in input
-    // order) so the caller can attach a re-computed embedding to each. REPLACE keeps the
-    // insert robust, though the manager assigns id = 0 (auto) and clears prior RESTORED rows
-    // first, so in practice this only ever adds fresh rows and never clobbers real ones by id.
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // Restored rows always use fresh ids and are merged without replacing local history.
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun restoreOverrides(overrides: List<NotificationReviewEntity>): List<Long>
 
-    // Clears previously-restored rows so re-importing the same backup is idempotent
-    // (no duplicate memory entries). RESTORED is a synthetic systemDecision used only by
-    // the restore path — real notifications never carry it, so this cannot touch history.
-    @Query("DELETE FROM notification_review WHERE systemDecision = 'RESTORED'")
-    suspend fun deleteRestored()
+    // One transaction preserves earlier imports and makes repeated imports idempotent.
+    // Return ids in input order, including existing rows, so an interrupted import can
+    // resume embedding without inserting a second copy of any saved decision.
+    @Transaction
+    suspend fun mergeRestoredOverrides(overrides: List<NotificationReviewEntity>): List<Long> {
+        // A local correction to the same original message wins over the older backup's
+        // verdict/category. Prefer real history if a previous build imported a duplicate.
+        val existing = getAllOverrides().sortedBy { it.systemDecision != "RESTORED" }
+            .associate { it.overrideIdentity() to it.id }.toMutableMap()
+        return overrides.map { row ->
+            val id = existing.getOrPut(row.overrideIdentity()) { restoreOverrides(listOf(row)).single() }
+            if (getById(id)?.messageText.isNullOrBlank()) updateMessageText(id, row.messageText)
+            id
+        }
+    }
 
     // ── AI Memory reset ────────────────────────────────────────────────────────
     // Wipes all learned state from the notification_review table: clears embeddings,
@@ -262,3 +311,15 @@ interface NotificationReviewDao {
     """)
     fun countTodayAiUndecidedFlow(startOfDayMs: Long): Flow<Int>
 }
+
+private data class OverrideIdentity(
+    val text: String,
+    val packageName: String,
+    val timestamp: Long,
+)
+
+private fun NotificationReviewEntity.overrideIdentity() = OverrideIdentity(
+    messageText.ifBlank { listOf(title, content).filter(String::isNotBlank).joinToString(" ") }
+        .lowercase(Locale.ROOT),
+    packageName, timestamp,
+)

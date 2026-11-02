@@ -1,24 +1,22 @@
 package dev.zig.notificationfilter
 
-import android.Manifest
 import android.app.Application
-import androidx.core.content.ContextCompat
-import androidx.core.content.PermissionChecker
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
-import dev.zig.notificationfilter.data.local.NativeBridge
-import dev.zig.notificationfilter.data.local.db.DefaultRuleSeeder
+import dev.zig.notificationfilter.data.local.FilterState
 import dev.zig.notificationfilter.data.local.db.DemoDataSeeder
 import dev.zig.notificationfilter.data.local.db.KeywordRuleDao
-import dev.zig.notificationfilter.data.local.db.KeywordRuleType
 import dev.zig.notificationfilter.data.local.db.ManagedAppDao
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
+import dev.zig.notificationfilter.domain.NotificationHealth
 import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.AppErrors
+import dev.zig.notificationfilter.core.errors.ErrorReportStore
+import dev.zig.notificationfilter.core.errors.launchSafely
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -29,9 +27,10 @@ class ZigApp : Application(), Configuration.Provider {
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
-    @Inject lateinit var defaultRuleSeeder: DefaultRuleSeeder
     @Inject lateinit var demoDataSeeder: DemoDataSeeder
     @Inject lateinit var preferences: ZigUserPreferences
+    @Inject lateinit var filterState: FilterState
+    @Inject lateinit var notificationHealth: NotificationHealth
 
     @Inject
     @ApplicationScope
@@ -45,25 +44,15 @@ class ZigApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        AppErrors.run("Preparing error reporting") { ErrorReportStore.initialize(this) }
+        notificationHealth.ensureListenerConnected()
         // Repopulate Rust in-process sets from Room on cold start.
         // The NotificationListenerService binds before MainActivity ever opens,
         // so these syncs must happen at Application level, not in any ViewModel.
-        appScope.launch {
+        appScope.launchSafely("Loading saved notification settings") {
             // Seed default rules before the NativeBridge snapshot so they are active
             // in the Rust filter set from the very first launch.
-            defaultRuleSeeder.seedIfNeeded()
-
-            managedAppDao.getAllPackageNames().forEach { pkg ->
-                NativeBridge.addAppToManaged(pkg)
-            }
-            keywordRuleDao.getAllSnapshot().forEach { rule ->
-                val joined = rule.conditions.joinToString("||")
-                if (rule.ruleType == KeywordRuleType.BLOCK.name) {
-                    NativeBridge.addKeywordRuleToBlocklist(joined)
-                } else {
-                    NativeBridge.addKeywordRuleToWhitelist(joined)
-                }
-            }
+            filterState.awaitReady()
             // Insert the two sample notifications on first launch so the onboarding tour
             // has real cards to demonstrate Allow / Block / Undo and the category chip.
             demoDataSeeder.seedIfNeeded()
@@ -73,20 +62,14 @@ class ZigApp : Application(), Configuration.Provider {
         // The setup checklist is the gated path for READ_CONTACTS acquisition;
         // starting the observer earlier would crash on Samsung devices, which enforce
         // the permission at ContentObserver registration time.
-        // On subsequent cold starts (onboarding already done) both calls are safe:
-        // register() is permission-guarded and idempotent, syncContacts() is
-        // guarded by its own permission check below.
+        // Registration is permission-guarded and idempotent; FilterState loads
+        // contacts before marking startup rules ready.
         if (preferences.onboardingCompleted && preferences.contactsBypassEnabled) {
-            contactsSyncManager.register()
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) ==
-                    PermissionChecker.PERMISSION_GRANTED) {
-                contactsSyncManager.syncContacts()
-            }
+            AppErrors.run("Starting contact observation") { contactsSyncManager.register() }
         }
 
-        // Enqueue the daily summary worker. KEEP policy means this is a no-op on every
-        // subsequent launch once already scheduled. Users who opt out call cancel() from
-        // the ViewModel, which removes the unique work entry; re-enabling calls schedule().
-        dailySummaryScheduler.schedule()
+        // Restore the chosen recap time and retire the old periodic WorkManager job.
+        // Scheduling also turns the recap off if Android's timing access was revoked.
+        AppErrors.run("Scheduling daily summary") { dailySummaryScheduler.schedule() }
     }
 }

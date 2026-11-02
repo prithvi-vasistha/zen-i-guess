@@ -58,4 +58,9 @@ data class NotificationReviewEntity(
     // Empty string for every row inserted before v8 — they never match.
     @ColumnInfo(collate = ColumnInfo.NOCASE)
     val messageText: String = "",
+    // Independent of the filtering decision: legacy rows have no delivery evidence.
+    @ColumnInfo(defaultValue = "'LEGACY'")
+    val deliveryStatus: String = "LEGACY",
+    @ColumnInfo(defaultValue = "''")
+    val deliveryDetail: String = "",
 )

@@ -3,9 +3,18 @@ package dev.zig.notificationfilter
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationManagerCompat
@@ -13,12 +22,17 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.zig.notificationfilter.data.local.ContactsSyncManager
 import dev.zig.notificationfilter.data.preferences.ZigUserPreferences
 import dev.zig.notificationfilter.domain.NotificationPublisher
+import dev.zig.notificationfilter.domain.NotificationHealth
+import dev.zig.notificationfilter.domain.summary.DailySummaryScheduler
+import dev.zig.notificationfilter.service.ZigNotificationListenerService
 import dev.zig.notificationfilter.ui.MainScreen
 import dev.zig.notificationfilter.ui.navigation.ZigScreen
 import dev.zig.notificationfilter.ui.onboarding.OnboardingScreen
 import dev.zig.notificationfilter.ui.onboarding.TermsAndConditionsScreen
 import dev.zig.notificationfilter.ui.theme.ZigTheme
 import javax.inject.Inject
+import dev.zig.notificationfilter.core.errors.AppErrors
+import dev.zig.notificationfilter.ui.common.AppErrorDialog
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -37,29 +51,47 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var contactsSyncManager: ContactsSyncManager
     @Inject lateinit var preferences: ZigUserPreferences
+    @Inject lateinit var notificationHealth: NotificationHealth
+    @Inject lateinit var dailySummaryScheduler: DailySummaryScheduler
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         termsAccepted = preferences.termsAccepted
         onboardingCompleted = preferences.onboardingCompleted
-        startTab = resolveStartTab(intent)
-        if (resolveDailyReview(intent)) dailyReviewNonce++
-        dismissNotificationIfRequested(intent)
-        enableEdgeToEdge()
+        handleNotificationIntent(intent)
+        AppErrors.run("Preparing system bars") { enableEdgeToEdge() }
         setContent {
-            ZigTheme {
+            val appearance by preferences.appearance.collectAsStateWithLifecycle()
+            val listenerState by notificationHealth.snapshot.collectAsStateWithLifecycle()
+            val pendingErrors by AppErrors.pending.collectAsStateWithLifecycle()
+            var accessReminderDismissed by rememberSaveable { mutableStateOf(false) }
+            SafeLaunchedEffect(listenerState.notificationAccess) {
+                if (listenerState.notificationAccess) accessReminderDismissed = false
+            }
+            val darkTheme = appearance.mode.isDark(isSystemInDarkTheme())
+            SideEffect {
+                // System bar icons follow ZiG's override as well as the system theme.
+                val bars = if (darkTheme) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                AppErrors.run("Updating system bars") { enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars) }
+            }
+            ZigTheme(appearance = appearance, darkTheme = darkTheme) {
                 when {
                     !termsAccepted -> TermsAndConditionsScreen(
                         onAccepted = {
-                            preferences.termsAccepted = true
-                            termsAccepted = true
+                            AppErrors.run("Saving terms acceptance") {
+                                preferences.termsAccepted = true
+                                termsAccepted = true
+                            }
                         },
                     )
                     !onboardingCompleted -> OnboardingScreen(
                         onCompleted = {
-                            preferences.onboardingCompleted = true
-                            startTab = ZigScreen.all.indexOf(ZigScreen.Apps)
-                            onboardingCompleted = true
+                            AppErrors.run("Completing setup") {
+                                preferences.onboardingCompleted = true
+                                startTab = ZigScreen.all.indexOf(ZigScreen.Apps)
+                                onboardingCompleted = true
+                            }
                         },
                     )
                     else -> MainScreen(
@@ -67,6 +99,22 @@ class MainActivity : ComponentActivity() {
                         dailyReviewNonce = dailyReviewNonce,
                     )
                 }
+                if (pendingErrors.isEmpty() && termsAccepted && onboardingCompleted && !listenerState.notificationAccess && !accessReminderDismissed) {
+                    AlertDialog(
+                        onDismissRequest = { accessReminderDismissed = true },
+                        title = { Text("Enable notification access") },
+                        text = { Text("ZiG needs notification access to filter your notifications. Enable it in Android settings to continue filtering.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                if (notificationHealth.openNotificationAccess()) accessReminderDismissed = true
+                            }) { Text("Open settings") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { accessReminderDismissed = true }) { Text("Not now") }
+                        },
+                    )
+                }
+                AppErrorDialog()
             }
         }
     }
@@ -75,9 +123,7 @@ class MainActivity : ComponentActivity() {
     // instead of onCreate when FLAG_ACTIVITY_CLEAR_TOP brings an existing instance to front.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        startTab = resolveStartTab(intent)
-        if (resolveDailyReview(intent)) dailyReviewNonce++
-        dismissNotificationIfRequested(intent)
+        handleNotificationIntent(intent)
     }
 
     // ContactsSyncManager must not be initialized before onboarding is complete —
@@ -86,10 +132,23 @@ class MainActivity : ComponentActivity() {
     // after onboarding is safe.
     override fun onResume() {
         super.onResume()
+        AppErrors.run("Restoring daily summary schedule") { dailySummaryScheduler.resolvePermissionRequest() }
+        notificationHealth.ensureListenerConnected()
+        ZigNotificationListenerService.instance?.reconcileActiveNotifications()
         if (!onboardingCompleted) return
         if (preferences.contactsBypassEnabled) {
-            contactsSyncManager.register()
-            contactsSyncManager.requestSyncIfNeeded()
+            AppErrors.run("Updating contacts") {
+                contactsSyncManager.register()
+                contactsSyncManager.requestSyncIfNeeded()
+            }
+        }
+    }
+
+    private fun handleNotificationIntent(intent: Intent?) {
+        AppErrors.run("Opening notification") {
+            startTab = resolveStartTab(intent)
+            if (resolveDailyReview(intent)) dailyReviewNonce++
+            dismissNotificationIfRequested(intent)
         }
     }
 
@@ -110,7 +169,11 @@ class MainActivity : ComponentActivity() {
             NotificationPublisher.EXTRA_ZIG_NOTIF_TO_DISMISS, Int.MIN_VALUE,
         ) ?: return
         if (notifId != Int.MIN_VALUE) {
-            NotificationManagerCompat.from(this).cancel(notifId)
+            AppErrors.run("Dismissing notification") {
+                NotificationManagerCompat.from(this).cancel(
+                    intent.getStringExtra(NotificationPublisher.EXTRA_ZIG_NOTIF_TAG), notifId,
+                )
+            }
         }
     }
 }

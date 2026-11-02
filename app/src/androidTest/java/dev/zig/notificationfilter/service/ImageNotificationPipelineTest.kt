@@ -53,6 +53,7 @@ class ImageNotificationPipelineTest {
             SystemClock.sleep(50L)
         }
         listener = checkNotNull(ZigNotificationListenerService.instance) { "Listener did not connect" }
+        runBlocking { withTimeout(10_000L) { listener.filterState.awaitReady() } }
         preferences = listener.preferences
         previousImagesEnabled = preferences.imageNotificationsEnabled
         previousContactsEnabled = preferences.contactsBypassEnabled
@@ -82,7 +83,10 @@ class ImageNotificationPipelineTest {
                     NativeBridge.addKeywordRuleToWhitelist(joined)
                 }
             }
-        forwardedId?.let { context.getSystemService(NotificationManager::class.java).cancel(it) }
+        context.getSystemService(NotificationManager::class.java).activeNotifications
+            .filter { it.id == forwardedId }.forEach {
+                context.getSystemService(NotificationManager::class.java).cancel(it.tag, it.id)
+            }
         shell("cmd notification disallow_listener $listenerComponent")
     }
 
@@ -187,8 +191,8 @@ class ImageNotificationPipelineTest {
         listener.onNotificationPosted(sbn)
         return withTimeout(15_000L) {
             listener.reviewDao.searchActiveFlow(0L, sourcePackage)
-                .first { rows -> rows.any { it.timestamp == postedAt } }
-                .first { it.timestamp == postedAt }
+                .first { rows -> rows.any { it.timestamp == postedAt && it.deliveryStatus != "POSTING" } }
+                .first { it.timestamp == postedAt && it.deliveryStatus != "POSTING" }
         }
     }
 

@@ -13,7 +13,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.zig.notificationfilter.core.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
+import dev.zig.notificationfilter.core.errors.AppErrors
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,6 +26,7 @@ class ContactsSyncManager @Inject constructor(
     @ApplicationContext private val context: Context,
     @ApplicationScope private val appScope: CoroutineScope,
 ) {
+    private val syncMutex = Mutex()
     // Guards against duplicate initial syncs across ZigApp.onCreate() and MainActivity.onResume().
     // Volatile because it is written on the main thread and read on Dispatchers.IO.
     @Volatile private var initialSyncDone = false
@@ -31,7 +36,7 @@ class ContactsSyncManager @Inject constructor(
 
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) {
-            appScope.launch(Dispatchers.IO) { doSync() }
+            appScope.launchSafely("Updating changed contacts", Dispatchers.IO) { doSync() }
         }
     }
 
@@ -42,13 +47,15 @@ class ContactsSyncManager @Inject constructor(
      * accidental double-registration on subsequent onResume() calls.
      */
     fun register() {
-        if (!hasContactsPermission() || isRegistered) return
-        context.contentResolver.registerContentObserver(
-            ContactsContract.Contacts.CONTENT_URI,
-            true,
-            observer,
-        )
-        isRegistered = true
+        AppErrors.run("Starting contact observation") {
+            if (!hasContactsPermission() || isRegistered) return@run
+            context.contentResolver.registerContentObserver(
+                ContactsContract.Contacts.CONTENT_URI,
+                true,
+                observer,
+            )
+            isRegistered = true
+        }
     }
 
     /**
@@ -58,8 +65,10 @@ class ContactsSyncManager @Inject constructor(
      */
     fun syncContacts() {
         initialSyncDone = true
-        appScope.launch(Dispatchers.IO) { doSync() }
+        appScope.launchSafely("Synchronizing contacts", Dispatchers.IO) { doSync() }
     }
+
+    suspend fun syncNow() = withContext(Dispatchers.IO) { doSync() }
 
     /**
      * Called from MainActivity.onResume() to fire the very first sync after the user
@@ -79,17 +88,18 @@ class ContactsSyncManager @Inject constructor(
      * Safe to call if never registered.
      */
     fun unregister() {
-        if (!isRegistered) return
-        context.contentResolver.unregisterContentObserver(observer)
-        isRegistered = false
-        initialSyncDone = false
-        NativeBridge.clearContactWhitelist()
+        AppErrors.run("Stopping contact observation") {
+            if (isRegistered) context.contentResolver.unregisterContentObserver(observer)
+            isRegistered = false
+            initialSyncDone = false
+            NativeBridge.clearContactWhitelist()
+        }
     }
 
-    private fun doSync() {
-        if (!hasContactsPermission()) return
+    private suspend fun doSync() = syncMutex.withLock {
+        if (!hasContactsPermission()) return@withLock
         try {
-            NativeBridge.clearContactWhitelist()
+            val names = mutableListOf<String>()
             context.contentResolver.query(
                 ContactsContract.Contacts.CONTENT_URI,
                 arrayOf(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY),
@@ -98,16 +108,19 @@ class ContactsSyncManager @Inject constructor(
                 null,
             )?.use { cursor ->
                 val col = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)
-                if (col == -1) return
+                if (col == -1) return@withLock
                 while (cursor.moveToNext()) {
                     val name = cursor.getString(col)?.trim()?.lowercase()
                     if (!name.isNullOrBlank()) {
-                        NativeBridge.addContactToWhitelist(name)
+                        names.add(name)
                     }
                 }
-            }
+            } ?: return@withLock
+            NativeBridge.replaceContacts(names)
+            initialSyncDone = true
         } catch (e: Throwable) {
-            Log.e("ZIG_CRASH", "Native JNI crash during contact sync: ", e)
+            initialSyncDone = false
+            AppErrors.report("Synchronizing contacts", e, 60_000L)
         }
     }
 

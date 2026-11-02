@@ -39,6 +39,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import dev.zig.notificationfilter.ui.common.themedDoodlePainter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,7 +52,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +102,7 @@ private fun ManagedAppsList(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     // The app pending an unmanage confirmation, or null when no dialog is showing.
     var appToUnmanage by remember { mutableStateOf<ManagedAppsViewModel.InstalledApp?>(null) }
+    var appForOriginalAlerts by remember { mutableStateOf<ManagedAppsViewModel.InstalledApp?>(null) }
 
     val managedApps = uiState.apps.filter { it.isManaged }
 
@@ -197,6 +198,7 @@ private fun ManagedAppsList(
                                     app = app,
                                     onOpenSettings = { openNotificationSettings(context, app.packageName) },
                                     onRemove = { appToUnmanage = app },
+                                    onOwnAlerts = { appForOriginalAlerts = app },
                                 )
                                 HorizontalDivider(modifier = Modifier.padding(start = 68.dp))
                             }
@@ -217,6 +219,21 @@ private fun ManagedAppsList(
                 Icon(imageVector = Icons.Default.Add, contentDescription = "Add apps")
             }
         }
+    }
+
+    appForOriginalAlerts?.let { app ->
+        AlertDialog(
+            onDismissRequest = { appForOriginalAlerts = null },
+            title = { Text("Use ${app.appName}'s own alerts?") },
+            text = { Text("ZiG will stop filtering this app. In the Android settings that open next, enable its notifications and alert sound. Other notifications from this app, including promotions and images, can also alert you.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.useOriginalAlerts(app.packageName)
+                    appForOriginalAlerts = null
+                }) { Text("Use own alerts") }
+            },
+            dismissButton = { TextButton(onClick = { appForOriginalAlerts = null }) { Text("Cancel") } },
+        )
     }
 
     appToUnmanage?.let { app ->
@@ -252,7 +269,7 @@ private fun EmptyManagedState(modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.Center,
     ) {
         Image(
-            painter = painterResource(R.drawable.ic_empty_managed_apps),
+            painter = themedDoodlePainter(R.drawable.ic_empty_managed_apps),
             contentDescription = null,
         )
         Spacer(Modifier.height(20.dp))
@@ -276,7 +293,11 @@ private fun EmptyManagedState(modifier: Modifier = Modifier) {
 private fun SetupBanner(onDismiss: () -> Unit) {
     val context = LocalContext.current
     Card(
-        onClick = { context.startActivity(Intent("android.settings.NOTIFICATION_SETTINGS")) },
+        onClick = {
+            dev.zig.notificationfilter.core.errors.AppErrors.run("Opening notification settings") {
+                context.startActivity(Intent("android.settings.NOTIFICATION_SETTINGS"))
+            }
+        },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
         ),
@@ -322,6 +343,7 @@ private fun ManagedAppRow(
     app: ManagedAppsViewModel.InstalledApp,
     onOpenSettings: () -> Unit,
     onRemove: () -> Unit,
+    onOwnAlerts: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -359,6 +381,7 @@ private fun ManagedAppRow(
             }
         }
         // Right zone: remove from the managed set (asks for confirmation first).
+        TextButton(onClick = onOwnAlerts) { Text("Own alerts") }
         IconButton(
             onClick = onRemove,
             modifier = Modifier.padding(end = 8.dp),
@@ -374,8 +397,10 @@ private fun ManagedAppRow(
 
 /** Opens the given package's system notification settings. */
 internal fun openNotificationSettings(context: android.content.Context, packageName: String) {
-    context.startActivity(
-        Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName),
-    )
+    dev.zig.notificationfilter.core.errors.AppErrors.run("Opening app notification settings") {
+        context.startActivity(
+            Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName),
+        )
+    }
 }

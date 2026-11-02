@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "export_date": 1720272000,
+  "preferences": {"daily_summary_enabled": false, "sensitive_notifications_enabled": true},
+  "rac_memory": [
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "timestamp": 101},
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "timestamp": 102},
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "timestamp": 103},
+    {"messageText": "Bank Payment Your salary has been credited", "userOverrideStatus": "MANUALLY_ALLOWED", "timestamp": 104}
+  ]
+}

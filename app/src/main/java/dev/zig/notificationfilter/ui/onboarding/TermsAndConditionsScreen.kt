@@ -35,8 +35,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import dev.zig.notificationfilter.ui.theme.ZigGreen
-import dev.zig.notificationfilter.ui.theme.ZigOnGreen
 
 @Composable
 fun TermsAndConditionsScreen(onAccepted: () -> Unit) {
@@ -106,8 +104,8 @@ fun TermsAndConditionsScreen(onAccepted: () -> Unit) {
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = ZigGreen,
-                    contentColor = ZigOnGreen,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
                 Text("I Agree", style = MaterialTheme.typography.labelLarge)
@@ -122,7 +120,7 @@ private fun TermsBullet(icon: ImageVector, title: String, body: String) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = ZigGreen,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(22.dp),
         )
         Spacer(Modifier.width(16.dp))

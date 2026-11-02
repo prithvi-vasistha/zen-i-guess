@@ -6,15 +6,14 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import dev.zig.notificationfilter.ui.theme.ZigGreen
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
 
 @Composable
 fun ScrollFab(
@@ -28,15 +27,15 @@ fun ScrollFab(
     if (totalItems >= 10) {
         SmallFloatingActionButton(
             onClick = {
-                scope.launch {
+                scope.launchSafely("Updating screen") {
                     val total = listState.layoutInfo.totalItemsCount
                     if (isAtTop) listState.animateScrollToItem(total - 1)
                     else listState.animateScrollToItem(0)
                 }
             },
             modifier = modifier,
-            containerColor = ZigGreen,
-            contentColor = Color.Black,
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
         ) {
             Icon(
                 imageVector = if (isAtTop) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,

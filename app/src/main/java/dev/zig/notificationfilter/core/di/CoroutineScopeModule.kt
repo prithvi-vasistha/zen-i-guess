@@ -8,6 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Singleton
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -19,5 +20,5 @@ object CoroutineScopeModule {
     @Singleton
     @ApplicationScope
     fun provideApplicationScope(): CoroutineScope =
-        CoroutineScope(Dispatchers.IO + SupervisorJob())
+        CoroutineScope(Dispatchers.IO + SupervisorJob() + AppErrors.handler("Background task"))
 }

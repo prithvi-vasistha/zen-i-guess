@@ -21,6 +21,8 @@ class BackupPayloadTest {
             dailySummaryEnabled = true,
             sensitiveNotificationsEnabled = false,
             imageNotificationsEnabled = false,
+            hiddenContentAlertsEnabled = false,
+            appearance = BackupAppearance("dark", "amoled", "purple"),
         ),
         managedApps = listOf("com.bank.app", "com.chat.app"),
         keywordRules = listOf(listOf("OTP", "verification"), listOf("code")),
@@ -55,6 +57,8 @@ class BackupPayloadTest {
         assertTrue(text.contains("\"daily_summary_enabled\""))
         assertTrue(text.contains("\"sensitive_notifications_enabled\""))
         assertTrue(text.contains("\"image_notifications_enabled\""))
+        assertTrue(text.contains("\"hidden_content_alerts_enabled\""))
+        assertTrue(text.contains("\"appearance\""))
         assertTrue(text.contains("\"managed_apps\""))
         assertTrue(text.contains("\"keyword_rules\""))
         assertTrue(text.contains("\"category_overrides\""))
@@ -104,6 +108,32 @@ class BackupPayloadTest {
             BackupPayload.serializer(), json.encodeToString(BackupPayload.serializer(), sample()),
         )
         assertEquals(false, restored.preferences.imageNotificationsEnabled)
+    }
+
+    @Test fun `older backups leave hidden alerts unspecified`() {
+        val old = """{"version":3,"export_date":100,"preferences":{
+            "daily_summary_enabled":false,"sensitive_notifications_enabled":true},"rac_memory":[]}"""
+        assertNull(json.decodeFromString(BackupPayload.serializer(), old).preferences.hiddenContentAlertsEnabled)
+    }
+
+    @Test fun `hidden alert opt out survives backup serialization`() {
+        val restored = json.decodeFromString(BackupPayload.serializer(), json.encodeToString(BackupPayload.serializer(), sample()))
+        assertEquals(false, restored.preferences.hiddenContentAlertsEnabled)
+    }
+
+    @Test
+    fun `older backups leave appearance unspecified`() {
+        val old = """{"version":4,"export_date":100,"preferences":{
+            "daily_summary_enabled":false,"sensitive_notifications_enabled":true},"rac_memory":[]}"""
+        assertNull(json.decodeFromString(BackupPayload.serializer(), old).preferences.appearance)
+    }
+
+    @Test
+    fun `unknown appearance IDs fall back individually without rejecting a backup`() {
+        val appearance = BackupAppearance("dark", "future", "blue").toPreferences()
+        assertEquals(dev.zig.notificationfilter.data.preferences.ThemeMode.DARK, appearance.mode)
+        assertEquals(dev.zig.notificationfilter.data.preferences.ThemeStyle.ZIG, appearance.style)
+        assertEquals(dev.zig.notificationfilter.data.preferences.AccentColor.BLUE, appearance.accent)
     }
 
     @Test

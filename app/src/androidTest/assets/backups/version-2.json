@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "export_date": 1720272000,
+  "preferences": {"daily_summary_enabled": false, "sensitive_notifications_enabled": true},
+  "managed_apps": ["com.shop.app", "com.bank.app"],
+  "keyword_rules": [["OTP", "verification"]],
+  "category_overrides": [{"packageName": "com.shop.app", "defaultCategory": "PROMOTIONS"}],
+  "rac_memory": [
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "packageName": "com.shop.app", "timestamp": 101},
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "packageName": "com.shop.app", "timestamp": 102},
+    {"messageText": "Shop Offer Exclusive sale on running shoes today", "userOverrideStatus": "MANUALLY_BLOCKED", "packageName": "com.shop.app", "timestamp": 103},
+    {"messageText": "Bank Payment Your salary has been credited", "userOverrideStatus": "MANUALLY_ALLOWED", "packageName": "com.bank.app", "timestamp": 104}
+  ]
+}

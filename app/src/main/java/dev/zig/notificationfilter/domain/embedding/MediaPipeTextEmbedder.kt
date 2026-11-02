@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import dev.zig.notificationfilter.core.errors.AppErrors
 
 /**
  * [TextEmbedder] backed by MediaPipe's Text Embedder task running the Universal Sentence
@@ -51,7 +52,8 @@ class MediaPipeTextEmbedder @Inject constructor(
                 .setL2Normalize(true)
                 .build()
             MpTextEmbedder.createFromOptions(context, options)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            AppErrors.report("Preparing message learning model", e)
             Log.e(TAG, "Failed to initialise text embedder — Personal Memory disabled", e)
             initFailed = true
             null
@@ -67,7 +69,8 @@ class MediaPipeTextEmbedder @Inject constructor(
                     val result = engine.embed(text)
                     result.embeddingResult().embeddings().firstOrNull()?.floatEmbedding()
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                AppErrors.report("Learning message text", e, 60_000L)
                 Log.e(TAG, "Embedding failed for input of length ${text.length}", e)
                 null
             }

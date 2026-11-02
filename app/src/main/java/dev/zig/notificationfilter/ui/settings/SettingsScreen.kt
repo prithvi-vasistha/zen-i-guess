@@ -1,5 +1,6 @@
 package dev.zig.notificationfilter.ui.settings
 
+import dev.zig.notificationfilter.core.errors.AppErrors
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,11 +16,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -40,26 +44,32 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import dev.zig.notificationfilter.ui.theme.ZigFullscreenDialog
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import dev.zig.notificationfilter.ui.theme.ZigGreen
+import dev.zig.notificationfilter.R
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import dev.zig.notificationfilter.domain.summary.DailySummaryState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,13 +80,32 @@ fun SettingsScreen(
     val dailySummaryEnabled by viewModel.dailySummaryEnabled.collectAsState()
     val dailySummaryHour by viewModel.dailySummaryHour.collectAsState()
     val dailySummaryMinute by viewModel.dailySummaryMinute.collectAsState()
+    val dailySummaryState by viewModel.dailySummaryState.collectAsState()
     val sensitiveNotificationsEnabled by viewModel.sensitiveNotificationsEnabled.collectAsState()
+    val hiddenContentAlertsEnabled by viewModel.hiddenContentAlertsEnabled.collectAsState()
     val contactsBypassEnabled by viewModel.contactsBypassEnabled.collectAsState()
     val imageNotificationsEnabled by viewModel.imageNotificationsEnabled.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val showClearMemoryDialog by viewModel.showClearMemoryDialog.collectAsState()
+    val appearance by viewModel.appearance.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshDailySummary()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        viewModel.refreshDailySummary()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val context = LocalContext.current
+    var showSummaryPermissionDialog by rememberSaveable { mutableStateOf(false) }
+    val summaryPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        viewModel.onSummaryPermissionReturned()
+    }
+    val onSummaryToggle: (Boolean) -> Unit = { enabled ->
+        if (!viewModel.setDailySummaryEnabled(enabled)) showSummaryPermissionDialog = true
+    }
 
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -85,7 +114,7 @@ fun SettingsScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    LaunchedEffect(Unit) {
+    SafeLaunchedEffect(Unit) {
         viewModel.messages.collect { snackbarHostState.showSnackbar(it) }
     }
 
@@ -99,6 +128,8 @@ fun SettingsScreen(
 
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showDailySummaryDetail by remember { mutableStateOf(false) }
+    var showAppearance by rememberSaveable { mutableStateOf(false) }
+    var showNotificationDisplay by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier,
@@ -131,15 +162,32 @@ fun SettingsScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item { SettingsSectionLabel("Appearance") }
+                item {
+                    SettingsActionRow(
+                        title = "Theme & accent colour",
+                        subtitle = "${appearance.mode.label} · ${appearance.style.label} · ${appearance.accent.label}",
+                        icon = ImageVector.vectorResource(R.drawable.ic_palette),
+                        onClick = { showAppearance = true },
+                    )
+                }
                 item {
                     SettingsSectionLabel("Notifications")
+                }
+                item {
+                    SettingsActionRow(
+                        title = "Pop-ups & lock screen",
+                        subtitle = "Choose how alerts appear when your phone is locked",
+                        icon = Icons.Default.Notifications,
+                        onClick = { showNotificationDisplay = true },
+                    )
                 }
                 item {
                     DailySummarySettingRow(
                         checked = dailySummaryEnabled,
                         hour = dailySummaryHour,
                         minute = dailySummaryMinute,
-                        onToggle = viewModel::setDailySummaryEnabled,
+                        onToggle = onSummaryToggle,
                         onRowClick = { showDailySummaryDetail = true },
                     )
                 }
@@ -149,6 +197,14 @@ fun SettingsScreen(
                         subtitle = "Skip text filtering on lock screen; image setting still applies",
                         checked = sensitiveNotificationsEnabled,
                         onCheckedChange = viewModel::setSensitiveNotificationsEnabled,
+                    )
+                }
+                item {
+                    SettingsToggleRow(
+                        title = "Alert for hidden content",
+                        subtitle = "Alert when Android hides a managed app's message, even with images off. Open the original app to read it.",
+                        checked = hiddenContentAlertsEnabled,
+                        onCheckedChange = viewModel::setHiddenContentAlertsEnabled,
                     )
                 }
                 item {
@@ -166,7 +222,7 @@ fun SettingsScreen(
                                 if (hasPermission) {
                                     viewModel.setContactsBypassEnabled(true)
                                 } else {
-                                    contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                                    AppErrors.run("Requesting contact access") { contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS) }
                                 }
                             }
                         },
@@ -190,7 +246,7 @@ fun SettingsScreen(
                         subtitle = "Save settings & learned decisions to a file",
                         icon = Icons.Default.Lock,
                         enabled = !isBusy,
-                        onClick = { exportLauncher.launch("zig-backup.json") },
+                        onClick = { AppErrors.run("Choosing backup destination") { exportLauncher.launch("zig-backup.json") } },
                     )
                 }
                 item {
@@ -258,15 +314,15 @@ fun SettingsScreen(
             title = { Text("Restore from backup?") },
             text = {
                 Text(
-                    "This overwrites your current settings and replaces any previously " +
-                        "restored decisions. Your existing notification history is left untouched.",
+                    "This applies the backup's settings and adds its saved decisions. " +
+                        "Your existing notification history and learned decisions are kept.",
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         showRestoreConfirm = false
-                        importLauncher.launch(arrayOf("application/json"))
+                        AppErrors.run("Choosing backup file") { importLauncher.launch(arrayOf("application/json")) }
                     },
                 ) { Text("Choose file") }
             },
@@ -282,11 +338,49 @@ fun SettingsScreen(
             hour = dailySummaryHour,
             minute = dailySummaryMinute,
             onBack = { showDailySummaryDetail = false },
-            onToggle = viewModel::setDailySummaryEnabled,
+            onToggle = onSummaryToggle,
+            summaryState = dailySummaryState,
+            onOpenChannel = { viewModel.openSummaryChannel() },
             onTimeConfirm = { h, m ->
                 viewModel.setSummaryTime(h, m)
                 showDailySummaryDetail = false
             },
+        )
+    }
+
+    if (showNotificationDisplay) {
+        NotificationDisplayDialog(
+            onOpenAlerts = { viewModel.openAlertDisplaySettings() },
+            onOpenPhoneSettings = { viewModel.openPhoneSettings() },
+            onDismiss = { showNotificationDisplay = false },
+        )
+    }
+
+    if (showAppearance) {
+        AppearanceScreen(
+            appearance = appearance,
+            onModeChange = viewModel::setThemeMode,
+            onStyleChange = viewModel::setThemeStyle,
+            onAccentChange = viewModel::setAccentColor,
+            onReset = viewModel::resetAppearance,
+            onBack = { showAppearance = false },
+        )
+    }
+
+    // Compose this after the detail dialog so it remains visible above that window.
+    if (showSummaryPermissionDialog) {
+        DailySummaryPermissionDialog(
+            onAllow = {
+                showSummaryPermissionDialog = false
+                viewModel.requestSummaryAccess()?.let { intent ->
+                    try { summaryPermissionLauncher.launch(intent) }
+                    catch (failure: RuntimeException) {
+                        AppErrors.report("Opening permission settings", failure)
+                        viewModel.skipSummaryAccess()
+                    }
+                }
+            },
+            onSkip = { showSummaryPermissionDialog = false; viewModel.skipSummaryAccess() },
         )
     }
 }
@@ -303,6 +397,8 @@ private fun DailySummaryDetailScreen(
     onBack: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onTimeConfirm: (Int, Int) -> Unit,
+    summaryState: DailySummaryState,
+    onOpenChannel: () -> Unit,
 ) {
     val timePickerState = rememberTimePickerState(
         initialHour = hour,
@@ -310,10 +406,7 @@ private fun DailySummaryDetailScreen(
         is24Hour = false,
     )
 
-    Dialog(
-        onDismissRequest = onBack,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
+    ZigFullscreenDialog(onDismissRequest = onBack) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
@@ -337,7 +430,8 @@ private fun DailySummaryDetailScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -349,6 +443,20 @@ private fun DailySummaryDetailScreen(
                         checked = enabled,
                         onCheckedChange = onToggle,
                     )
+
+                    Text(
+                        if (summaryState.timingAccess) "Timing access granted. The recap can arrive while your phone is asleep."
+                        else "Daily Summary stays off until Alarms & reminders access is allowed.",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    )
+                    if (summaryState.lastStatus.isNotBlank()) {
+                        Text("Last summary: ${summaryState.lastStatus}",
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                        if (summaryState.lastDetail.isNotBlank()) Text(summaryState.lastDetail,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.fillMaxWidth())
+                    }
+                    TextButton(onClick = onOpenChannel) { Text("Summary notification settings") }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -377,7 +485,7 @@ private fun SettingsSectionLabel(label: String) {
     Text(
         text = label,
         style = MaterialTheme.typography.labelMedium,
-        color = ZigGreen,
+        color = MaterialTheme.colorScheme.primary,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 2.dp),
@@ -406,7 +514,7 @@ private fun DailySummarySettingRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp)),
-        color = ZigGreen.copy(alpha = 0.08f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
@@ -446,7 +554,7 @@ private fun SettingsToggleRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp)),
-        color = ZigGreen.copy(alpha = 0.08f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
@@ -487,7 +595,7 @@ private fun SettingsActionRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp)),
-        color = ZigGreen.copy(alpha = if (enabled) 0.08f else 0.04f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.08f else 0.04f),
         shape = RoundedCornerShape(16.dp),
     ) {
         Row(
@@ -498,7 +606,7 @@ private fun SettingsActionRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = ZigGreen,
+                tint = MaterialTheme.colorScheme.primary,
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(

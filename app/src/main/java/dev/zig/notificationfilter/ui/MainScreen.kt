@@ -13,7 +13,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import dev.zig.notificationfilter.ui.common.SafeLaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,7 +30,7 @@ import dev.zig.notificationfilter.ui.navigation.ZigScreen
 import dev.zig.notificationfilter.ui.review.NotificationReviewRoute
 import dev.zig.notificationfilter.ui.rules.CustomRulesScreen
 import dev.zig.notificationfilter.ui.settings.SettingsScreen
-import kotlinx.coroutines.launch
+import dev.zig.notificationfilter.core.errors.launchSafely
 
 @Composable
 fun MainScreen(
@@ -47,7 +47,7 @@ fun MainScreen(
 
     // Jump to the requested tab when launched from a notification deep-link.
     // scrollToPage (not animate) so there is no visible swipe on cold launch.
-    LaunchedEffect(startTab) {
+    SafeLaunchedEffect(startTab) {
         if (startTab in ZigScreen.all.indices) {
             pagerState.scrollToPage(startTab)
         }
@@ -56,13 +56,13 @@ fun MainScreen(
     // The Daily Review deck is a full-screen overlay above the pager (its horizontal swipe would
     // otherwise fight the pager). Opened by the notification (nonce) or the in-app CTA.
     var showDailyReview by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(dailyReviewNonce) {
+    SafeLaunchedEffect(dailyReviewNonce) {
         if (dailyReviewNonce > 0) showDailyReview = true
     }
     val closeDailyReview: () -> Unit = {
         showDailyReview = false
         // "Back to Inbox": land on the Notifications feed.
-        coroutineScope.launch { pagerState.scrollToPage(ZigScreen.all.indexOf(ZigScreen.Review)) }
+        coroutineScope.launchSafely("Updating screen") { pagerState.scrollToPage(ZigScreen.all.indexOf(ZigScreen.Review)) }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -75,7 +75,7 @@ fun MainScreen(
                     NavigationBarItem(
                         selected = selected,
                         onClick = {
-                            coroutineScope.launch {
+                            coroutineScope.launchSafely("Updating screen") {
                                 pagerState.animateScrollToPage(index)
                             }
                         },

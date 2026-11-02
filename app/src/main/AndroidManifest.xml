@@ -19,6 +19,10 @@
     <!-- Required to post notifications on API 33+. Granted at runtime in the onboarding Activity. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Optional access for the user's chosen daily recap time, including while idle. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!--
         Declare visibility to all apps that expose a launcher intent.
         Required on API 30+ — without this, PackageManager silently omits
@@ -71,7 +75,7 @@
 
         <!--
             Receives explicit broadcasts from PendingIntents created by NotificationPublisher
-            for the "Dismiss" and "Open ZiG" notification action buttons.
+            for the "Dismiss" and "Copy code" notification action buttons.
             Not exported: only ZiG itself sends these broadcasts.
         -->
         <receiver
@@ -79,6 +83,17 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="dev.zig.notificationfilter.action.DISMISS" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".domain.summary.DailySummaryReceiver" android:exported="false" />
+        <receiver android:name=".domain.summary.DailySummaryRescheduleReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
