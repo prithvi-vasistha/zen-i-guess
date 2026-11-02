@@ -16,7 +16,7 @@ android {
         applicationId = "dev.zig.notificationfilter"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
+        versionCode = 16
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -100,13 +100,10 @@ dependencies {
     // Phase 1: MediaPipe / LiteRT dependency disabled (kept as reference).
     // implementation("com.google.mediapipe:tasks-genai:0.10.35")
 
-    // Phase 2: LiteRT (formerly TFLite) runtime + Support Library for on-device classification.
-    // litert: Interpreter, model loading, tensor I/O. Google rebranded TFLite → LiteRT in 2024;
-    // 1.0.1 is the first stable release with 16 KB page-aligned .so files for Android 15.
-    // litert-support: TensorBuffer and label utilities. Class names remain org.tensorflow.lite.*
-    // for backward compatibility — LocalModelEngine.kt requires no import changes.
-    implementation("com.google.ai.edge.litert:litert:1.0.1")
-    implementation("com.google.ai.edge.litert:litert-support:1.0.1")
+    // LiteRT 1.4.2 keeps the Interpreter API and aligns both arm64-v8a and x86_64
+    // native libraries to 16 KB. In 1.0.1 the x86_64 library was only 4 KB aligned.
+    // LocalModelEngine uses Interpreter directly; the Support Library is unnecessary.
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
 
     // Phase 4: MediaPipe Text tasks — on-device text embedding for Retrieval-Augmented
     // Classification (Personal Memory). Runs the Universal Sentence Encoder model in

@@ -181,7 +181,7 @@ native/rust_filter/              # Rust JNI library (cdylib)
 | Navigation | Navigation Compose | 2.8.3 |
 | Background work | WorkManager | 2.9.1 |
 | Native filter engine | Rust (JNI via `cargo-ndk`) | 2021 edition |
-| Base classifier | Custom TFLite via Google LiteRT | 1.0.1 |
+| Base classifier | Custom TFLite via Google LiteRT | 1.4.2 |
 | Text embeddings | MediaPipe Text Embedder (Universal Sentence Encoder) | 0.10.35 |
 | Build system | Gradle Kotlin DSL + AGP | 8.10.1 |
 | NDK | NDK | 27.0.12077973 |
@@ -211,6 +211,17 @@ cd zen-i-guess
 The on-device models (`zig_classifier.tflite`, `text_embedder.tflite`, and the classifier `vocab.json`) ship in the repository under `app/src/main/assets/`, so no model sideloading is required. The `buildRustLib` Gradle task cross-compiles the Rust filter engine for `arm64-v8a` and `x86_64` before every build — no manual `cargo` invocation is needed.
 
 The resulting APK is written to `app/build/outputs/apk/debug/`. Install it on a device, grant ZiG **Notification Access** and **Contacts** permission when prompted, and choose which apps it should manage.
+
+Before uploading a release, check every packaged 64-bit native library for 16 KB alignment:
+
+```bash
+./gradlew bundleRelease
+python3 scripts/check_native_page_sizes.py app/build/outputs/bundle/release/app-release.aab
+```
+
+The checker also accepts APKs and verifies their uncompressed native libraries' ZIP offsets.
+For runtime verification, run `NativeModelCompatibilityTest` on a 16 KB emulator; it exercises
+the real LiteRT classifier and MediaPipe embedding model together.
 
 ---
 
